@@ -1,8 +1,10 @@
-opencv-python
+redis
+requests
+psycopg2-binary
 numpy
+opencv-python
 scikit-image
 scikit-learn
 scipy
 pillow
 reportlab
-redis

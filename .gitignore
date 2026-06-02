@@ -1,0 +1,59 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+.idea/
+
+# VS Code local workspace settings
+.vscode/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.ipynb_checkpoints/
+build/
+dist/
+*.egg-info/
+
+# Worker/backend Python artifacts
+worker/.venv/
+worker/__pycache__/
+
+# Node / frontend (Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Go
+backend/bin/
+backend/coverage.out
+backend/*.test
+
+# Docker/runtime logs
+*.log
+logs/
+
+# Local generated assets and runtime folders
+input/
+output/

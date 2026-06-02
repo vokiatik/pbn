@@ -1,174 +1,133 @@
-# Paint-by-Numbers Photo Converter
+# Paint-by-Number Web Platform
 
-This project converts a realistic photo into a high-quality paint-by-number template while preserving composition and key details.
+This repository now includes a full local web platform around the existing Python paint-by-number algorithm.
 
-It is designed to avoid the common failure mode of:
-- too much blur, where important color differences disappear
-- too little cleanup, where thousands of tiny unpaintable regions remain
+Architecture:
 
-The pipeline combines edge-aware smoothing, superpixels, LAB-space palette clustering, region-graph merging, and morphological cleanup.
+React frontend
+-> Go backend API
+-> Redis queue
+-> Python worker (reuses existing pipeline)
+-> Generated files in shared storage
 
-## Command
-c:/Users/admin/pbn/.venv/Scripts/python.exe main.py input/photo.jpg --out output/ultra_small_pixels --colors 32 --size 2200 --detail-level 1.0 --superpixel-area-px 320 --superpixels-min 12000 --superpixels-max 40000 --min-region-area 24 --edge-threshold 0.14 --lab-merge-threshold 16 --cleanup-passes 0 --preserve-detail-regions --superpixel-shape adaptive (square) 
-## Project Structure
+## Services
 
-```text
-main.py
-pbn/
-  __init__.py
-  config.py
-  io.py
-  preprocess.py
-  edges.py
-  superpixels.py
-  palette.py
-  region_graph.py
-  merge.py
-  render.py
-  pdf_export.py
-  utils.py
-requirements.txt
-README.md
-```
+- frontend: React + TypeScript SPA (React Router + MUI)
+- backend: Go REST API + WebSocket + Redis pub/sub fanout
+- postgres: permanent storage
+- redis: queue, live status, pub/sub
+- worker: Python queue consumer that runs the existing pipeline in `main.py`
 
-## Install
+## Existing Processing Pipeline Reused
+
+No algorithm rewrite was introduced.
+
+Worker calls the existing entry point:
+- `run(config: PipelineConfig)` in `main.py`
+
+Known processing stages detected from existing logs:
+1. Loading + preprocessing image
+2. Building edge map
+3. Superpixel segmentation
+4. Palette clustering + initial assignment
+5. Importance map + safe region merging
+6. Raster cleanup + previews
+7. Line art + numbers + metadata
+8. Saving outputs
+
+Generated files detected and persisted:
+- `preview_color.png`
+- `pbn_lines.png`
+- `palette.png`
+- `palette.json`
+- `regions.json`
+- optional `paint_by_numbers.pdf`
+
+## Storage Layout
+
+Per project:
+
+`/storage/projects/{public_id}/original/{filename}`
+
+`/storage/projects/{public_id}/generated/*`
+
+In Docker Compose this maps to volume `storage_data`.
+
+## Status Lifecycle
+
+- uploaded
+- queued
+- processing
+- completed
+- failed
+- deleted
+
+Final status is stored in PostgreSQL. Live updates and notifications use Redis + WebSocket.
+
+## Queue and Limits
+
+- Redis queue key: `pbn:jobs`
+- max queue size: 20 (`QUEUE_MAX_SIZE`)
+- worker concurrency: 3 by default (`WORKER_CONCURRENCY`)
+- max active projects per client token: 2 (`MAX_ACTIVE_PROJECTS_PER_CLIENT`)
+
+## Run Locally (Docker Compose)
+
+Requirements:
+- Docker
+- Docker Compose
+
+Start:
 
 ```bash
-pip install -r requirements.txt
+docker compose up --build
 ```
 
-## CLI
+Endpoints:
+- frontend: http://localhost:5173
+- backend API: http://localhost:8080
+- websocket: ws://localhost:8080/ws
+
+Stop:
 
 ```bash
-python main.py input/photo.jpg --out output --colors 32 --size 4000 --min-region-area 80 --pdf
+docker compose down
 ```
 
-Main options:
-- `--colors`: target palette size, default `32`
-- `--size`: output longest side in pixels, default `4000`
-- `--detail-level`: detail preservation from `0.0` to `1.0`, default `0.6`
-- `--superpixel-area-px`: target average superpixel area; smaller values produce finer detail
-- `--superpixel-shape`: `square`, `adaptive`, or `very-adaptive` to control region geometry
-- `--superpixels-min`, `--superpixels-max`: control SLIC granularity for fine structures
-- `--min-region-area`: minimum paintable region area in pixels; if omitted, default is computed from image area
-- `--edge-threshold`: max average boundary edge strength for non-tiny merges
-- `--lab-merge-threshold`: max LAB distance for non-tiny merges
-- `--preserve-detail-regions`: strongly protect high-importance regions from merges, enabled by default
-- `--pdf`: export 2-page PDF output
-- `--importance-mask`: optional grayscale mask for detail-preservation guidance
+## API
 
-## Outputs
+Full endpoint documentation is in:
+- `docs/API.md`
 
-The script creates:
-- `preview_color.png`: simplified color preview with final palette
-- `pbn_lines.png`: white background, thin black boundaries, region numbers
-- `palette.png`: swatches with number, RGB, HEX
-- `palette.json`: palette list with number, RGB, HEX, LAB
-- `regions.json`: region metadata with region id, color number, area, centroid, bbox, and label skip info
-- `paint_by_numbers.pdf` when `--pdf` is enabled:
-  - page 1: numbered template
-  - page 2: palette and instructions
+Core endpoints:
+- `POST /api/projects`
+- `GET /api/projects`
+- `GET /api/projects/{public_id}`
+- `DELETE /api/projects/{public_id}`
+- `GET /api/projects/{public_id}/files/{file_id}/preview`
+- `GET /api/projects/{public_id}/files/{file_id}/download`
+- `POST /api/users/resolve`
+- `POST /api/users`
+- `POST /api/projects/{public_id}/attach-user`
+- `GET /ws`
 
-## Algorithm Overview
+## Optional User Info Before Download
 
-1. Preprocessing
-- Resize while preserving aspect ratio.
-- Convert to LAB.
-- Lift shadows by nonlinear remap of the L-channel to prevent black blobs.
-- Apply edge-preserving denoising with bilateral filtering and optional guided filtering or anisotropic diffusion when available.
-- Avoid Gaussian blur as the main smoother.
+Frontend supports this flow:
+1. User clicks Download.
+2. If project has no user, ask for email.
+3. If email exists, attach existing user.
+4. If not, ask username + phone, create user, attach.
+5. Continue download.
 
-2. Edge map
-- Compute a multi-scale edge map from fine and coarse Canny plus Sobel 3x3 and 5x5.
-- Normalize to `[0, 1]`.
-- Use edge map in merge decisions to avoid crossing strong boundaries.
+Skip is allowed.
 
-3. Superpixels
-- Segment with SLIC, typically from 6000 to 30000 segments depending on image area, detail level, and `--superpixel-area-px`.
-- Use `--superpixel-shape square` for compact, blockier SLIC regions.
-- Use `--superpixel-shape adaptive` for irregular edge-following regions (Felzenszwalb graph segmentation).
-- Use `--superpixel-shape very-adaptive` for even more irregular edge-following regions.
-- Compute per-superpixel mean LAB, mean RGB, area, neighbors, and shared-boundary edge strength.
+## Local Development Without Docker (Optional)
 
-4. Palette creation in LAB
-- Cluster superpixel mean LAB colors with MiniBatchKMeans.
-- Use superpixel area as weight so coherent surfaces influence the palette more than tiny noise.
+You can still run the original CLI pipeline directly:
 
-5. Initial assignment
-- Assign each superpixel to the nearest palette color in LAB distance.
-
-6. Region graph and safe merges
-- Build connected regions of same-color neighboring superpixels.
-- Tiny regions are merged only when conditions are safe:
-  - below minimum area
-  - meaningful shared border
-  - color distance not too large
-  - low enough edge strength across shared border
-- Merge target uses weighted score:
-
-```text
-score =
-  LAB_distance * 1.0
-  + edge_strength * 2.5
-  - shared_border_ratio * 1.5
-  + palette_penalty_if_color_changes
+```bash
+python main.py input/photo.jpg --out output --colors 32 --size 2200
 ```
 
-- Strong-edge crossing is blocked except for extremely tiny regions.
-- `--detail-level` raises superpixel density and strengthens edge barriers, so fine features are less likely to collapse.
-
-7. Importance-aware behavior
-- If no mask is provided, importance is estimated from face detections if available, high edge-density zones, and a central bias.
-- Important areas use smaller local minimum region area and stricter edge thresholds.
-- Background merges more aggressively.
-
-8. Morphological cleanup and rendering
-- Remove one-pixel artifacts with a majority filter when enabled.
-- Keep outlines thin.
-- Place numbers via distance transform interior maxima.
-- Skip labels for tiny regions and record that in `regions.json`.
-
-## Why LAB Color Space
-
-LAB better matches perceptual color distance than RGB. A Euclidean distance in LAB is more aligned with what humans see as a color difference, so palette assignment and merge gating are more reliable.
-
-## Why Superpixels
-
-Superpixels preserve local boundaries and dramatically reduce graph complexity. Operating at superpixel level avoids noisy pixel-level decisions while keeping meaningful object edges.
-
-## Why Edge-Aware Merging Beats Global Smoothing
-
-Global smoothing can erase boundaries needed for paintable segmentation. Edge-aware merging keeps semantic boundaries by checking edge strength along shared region borders before merging.
-
-## Tuning Guide
-
-- Too many tiny fragments:
-  - lower `--detail-level`
-  - increase `--superpixel-area-px`
-  - lower `--superpixels-max`
-  - increase `--min-region-area`
-  - decrease `--colors`
-  - increase `--merge-iterations`
-- Important detail lost:
-  - increase `--detail-level`
-  - decrease `--superpixel-area-px`
-  - increase `--superpixels-max`
-  - increase `--colors`
-  - reduce `--min-region-area`
-  - lower `--edge-threshold` so merges avoid crossing boundaries
-- Too many similar shades:
-  - reduce `--colors`
-  - increase `--lab-merge-threshold` slightly
-
-## Common Failure Modes and Fixes
-
-- Faces get oversimplified:
-  - increase `--detail-level`, for example `0.8` to `1.0`
-  - provide `--importance-mask` emphasizing face, eyes, and mouth
-  - increase `--colors`
-- Background remains too noisy:
-  - increase `--min-region-area`
-  - decrease `--colors`
-- Regions with no number text:
-  - decrease `--min-number-area`
-  - keep `line_width` small to preserve interior space
+The web platform integration uses the same Python code path through the worker.

@@ -1,0 +1,26 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap");
+
+:root {
+    --paper: #fffdf9;
+    --ink: #15203a;
+    --accent: #f05d23;
+    --soft: #f5efe6;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    color: var(--ink);
+    background:
+        radial-gradient(1200px 500px at 0% 0%, #ffe9c8, transparent 70%),
+        radial-gradient(1000px 400px at 100% 100%, #d4e7ff, transparent 70%),
+        var(--soft);
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}

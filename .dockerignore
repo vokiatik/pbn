@@ -1,0 +1,23 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+*.swp
+
+# Local data and outputs not needed for image builds
+input/
+output/
+
+# Frontend local deps/build artifacts
+frontend/node_modules/
+frontend/dist/
+
+# Python virtual env and cache artifacts
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.ipynb_checkpoints/
