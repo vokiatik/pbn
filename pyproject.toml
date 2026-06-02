@@ -1,0 +1,15 @@
+[project]
+name = "paint-by-numbers"
+version = "0.1.0"
+description = "Convert realistic photos into high-quality paint-by-number templates"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "opencv-python",
+  "numpy",
+  "scikit-image",
+  "scikit-learn",
+  "scipy",
+  "pillow",
+  "reportlab",
+]
