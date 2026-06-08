@@ -118,3 +118,22 @@ export function buildPreviewUrl(publicId: string, fileId: string): string {
 export function buildDownloadUrl(publicId: string, fileId: string): string {
     return `${API_BASE}/api/projects/${publicId}/files/${fileId}/download`;
 }
+
+export async function runProjectStep(
+    publicId: string,
+    step: number,
+    parameters: Record<string, unknown>
+): Promise<{ project_id: string; step: number; status: string }> {
+    const res = await fetch(`${API_BASE}/api/projects/${publicId}/steps/${step}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parameters }),
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to run step");
+    }
+
+    return res.json();
+}

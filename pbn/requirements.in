@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+
+numpy
+opencv-python-headless
+pillow
+scikit-image
+scikit-learn
+scipy
+torch
+sam2
+
+redis
+psycopg[binary]

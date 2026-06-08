@@ -97,10 +97,14 @@ export default function ProjectDetailsPage() {
         };
     }, [publicId]);
 
-    const previewFile = useMemo(
-        () => files.find((f) => f.mime_type.startsWith("image/") && f.file_type.includes("pbn_lines")) ?? files.find((f) => f.mime_type.startsWith("image/")),
-        [files]
-    );
+    const previewFile = useMemo(() => {
+        const preferredOrder = ["pbn_numbered", "pbn_outline", "colored_preview"];
+        for (const fileType of preferredOrder) {
+            const match = files.find((f) => f.file_type === fileType);
+            if (match) return match;
+        }
+        return files.find((f) => f.mime_type.startsWith("image/"));
+    }, [files]);
 
     const completeDownload = (fileId: string) => {
         window.open(buildDownloadUrl(publicId, fileId), "_blank", "noopener,noreferrer");

@@ -3,13 +3,22 @@ Param(
     [string]$ProjectName = "pbn",
     [int]$HealthTimeoutSeconds = 120,
     [string]$BackendHealthUrl = "http://localhost:8080/healthz",
-    [switch]$EnableServiceLogTailing = $true
+    [switch]$EnableServiceLogTailing = $true,
+    [string]$LogDirectory = "logs"
 )
 
 $ErrorActionPreference = "Stop"
 $script:TranscriptStarted = $false
-$script:TranscriptPath = Join-Path (Get-Location) ("dev_{0}.log" -f (Get-Date -Format "yyyyMMdd_HHmmss"))
+$script:RunTimestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$script:LogDirectoryPath = Join-Path (Get-Location) $LogDirectory
+$script:TranscriptPath = Join-Path $script:LogDirectoryPath ("dev_{0}.log" -f $script:RunTimestamp)
 $script:LogFiles = @{}
+
+function Ensure-LogDirectory {
+    if (-not (Test-Path -Path $script:LogDirectoryPath)) {
+        New-Item -ItemType Directory -Path $script:LogDirectoryPath -Force | Out-Null
+    }
+}
 
 function Stop-DevTranscript {
     if ($script:TranscriptStarted) {
@@ -24,6 +33,7 @@ function Stop-DevTranscript {
 }
 
 try {
+    Ensure-LogDirectory
     Start-Transcript -Path $script:TranscriptPath -Append | Out-Null
     $script:TranscriptStarted = $true
 }
@@ -72,7 +82,7 @@ function Start-ServiceLogTail {
         return
     }
 
-    $logPath = Join-Path (Get-Location) ("{0}_{1}.log" -f $Service, (Get-Date -Format "yyyyMMdd_HHmmss"))
+    $logPath = Join-Path $script:LogDirectoryPath ("{0}_{1}.log" -f $Service, (Get-Date -Format "yyyyMMdd_HHmmss"))
     $script:LogFiles[$Service] = $logPath
 
     "[{0}] Starting log tail for service '{1}'" -f (Get-Date -Format "s"), $Service | Out-File -FilePath $logPath -Encoding utf8 -Append

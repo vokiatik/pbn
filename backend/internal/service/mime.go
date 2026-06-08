@@ -9,6 +9,10 @@ func MimeFromFilename(name string) string {
 		return "image/png"
 	case strings.HasSuffix(n, ".jpg"), strings.HasSuffix(n, ".jpeg"):
 		return "image/jpeg"
+	case strings.HasSuffix(n, ".webp"):
+		return "image/webp"
+	case strings.HasSuffix(n, ".svg"):
+		return "image/svg+xml"
 	case strings.HasSuffix(n, ".json"):
 		return "application/json"
 	case strings.HasSuffix(n, ".pdf"):

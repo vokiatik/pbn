@@ -2,45 +2,36 @@ import { Alert, Box, Button, CircularProgress, Paper, Typography } from "@mui/ma
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadProject } from "../api/client";
-
-const validExt = [".png", ".jpg", ".jpeg"];
-const validMime = ["image/png", "image/jpeg"];
+const validExt = [".png", ".jpg", ".jpeg", ".webp"];
+const validMime = ["image/png", "image/jpeg", "image/webp"];
 
 function validateFile(file: File): string | null {
     const lower = file.name.toLowerCase();
     const hasValidExt = validExt.some((ext) => lower.endsWith(ext));
-    if (!hasValidExt) return "Only PNG and JPG/JPEG files are allowed.";
-    if (!validMime.includes(file.type)) return "Unsupported MIME type. Please upload a PNG or JPEG image.";
+
+    if (!hasValidExt) return "Only PNG, JPG/JPEG, and WEBP files are allowed.";
+    if (!validMime.includes(file.type)) return "Unsupported MIME type. Please upload a PNG, JPEG, or WEBP image.";
+
     return null;
 }
 
-export default function UploadPage() {
+export function UploadPage() {
     const [dragActive, setDragActive] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [isUploading, setIsUploading] = useState(false);
     const navigate = useNavigate();
 
-    const style = useMemo(
-        () => ({
-            border: `2px dashed ${dragActive ? "#f05d23" : "#9aa8c7"}`,
-            borderRadius: 4,
-            p: 6,
-            textAlign: "center",
-            backgroundColor: dragActive ? "#fff4ee" : "#fffdf9",
-            transition: "all 160ms ease",
-            cursor: "pointer",
-        }),
-        [dragActive]
-    );
-
     const startUpload = async (file: File) => {
         const msg = validateFile(file);
+
         if (msg) {
             setError(msg);
             return;
         }
+
         setError(null);
         setIsUploading(true);
+
         try {
             const result = await uploadProject(file);
             navigate(`/projects/${result.project_id}`);
@@ -56,11 +47,21 @@ export default function UploadPage() {
             <Typography variant="h4" fontWeight={700} gutterBottom>
                 Create Paint-by-Number Project
             </Typography>
+
             <Typography color="text.secondary" mb={3}>
-                Drag and drop an image. Generation starts automatically after successful upload.
+                Upload an image first. Generation will not start automatically; you will control every pipeline step.
             </Typography>
+
             <Paper
-                sx={style}
+                sx={{
+                    border: `2px dashed ${dragActive ? "#f05d23" : "#9aa8c7"}`,
+                    borderRadius: 4,
+                    p: 6,
+                    textAlign: "center",
+                    backgroundColor: dragActive ? "#fff4ee" : "#fffdf9",
+                    transition: "all 160ms ease",
+                    cursor: "pointer",
+                }}
                 onDragOver={(e) => {
                     e.preventDefault();
                     setDragActive(true);
@@ -74,25 +75,28 @@ export default function UploadPage() {
                 }}
             >
                 <Typography variant="h6" gutterBottom>
-                    Drop PNG or JPEG Here
+                    Drop PNG, JPEG, or WEBP here
                 </Typography>
+
                 <Typography mb={2}>or</Typography>
+
                 <Button variant="contained" component="label" disabled={isUploading}>
                     Choose File
                     <input
                         hidden
                         type="file"
-                        accept=".png,.jpg,.jpeg,image/png,image/jpeg"
+                        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
                         onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) void startUpload(file);
                         }}
                     />
                 </Button>
+
                 {isUploading && (
                     <Box mt={3} display="flex" gap={1} justifyContent="center" alignItems="center">
                         <CircularProgress size={18} />
-                        <Typography>Uploading and queueing request...</Typography>
+                        <Typography>Uploading image...</Typography>
                     </Box>
                 )}
             </Paper>

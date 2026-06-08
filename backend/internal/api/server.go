@@ -88,6 +88,8 @@ func (s *Server) Routes() http.Handler {
 
 		r.With(s.requireInternalSecret).Post("/internal/projects/{id}/status", s.handleInternalStatusUpdate)
 		r.With(s.requireInternalSecret).Post("/internal/projects/{id}/files", s.handleInternalFilesUpdate)
+
+		r.Post("/projects/{publicID}/steps/{step}/run", s.handleRunProjectStep)
 	})
 
 	return r
@@ -208,44 +210,22 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	originalFile := buildOriginalProjectFile(project)
+	originalFile.SizeBytes = fh.Size
+	if err := s.repo.ReplaceProjectFiles(r.Context(), projectID, []repository.ProjectFile{originalFile}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to register uploaded file"})
+		return
+	}
+
 	_ = s.events.Publish(r.Context(), map[string]any{
 		"type":       "status_changed",
 		"project_id": publicID,
 		"status":     "uploaded",
 	})
 
-	payload := map[string]any{
-		"project_id":   project.ID.String(),
-		"public_id":    publicID,
-		"input_path":   originalPath,
-		"output_path":  generatedDir,
-		"parameters":   map[string]any{},
-		"created_at":   time.Now().UTC().Format(time.RFC3339),
-		"retry_count":  0,
-		"max_retries":  2,
-		"callback_base": fmt.Sprintf("http://backend:%s/api/internal", s.cfg.HTTPPort),
-	}
-	if err := s.queue.Enqueue(r.Context(), payload); err != nil {
-		_ = s.repo.UpdateProjectStatus(r.Context(), projectID, "failed", true)
-		if errors.Is(err, service.ErrQueueFull) {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue is full, please try again later"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to enqueue project"})
-		return
-	}
-
-	_ = s.repo.UpdateProjectStatus(r.Context(), projectID, "queued", false)
-
-	_ = s.events.Publish(r.Context(), map[string]any{
-		"type":       "status_changed",
+	writeJSON(w, http.StatusCreated, map[string]any{
 		"project_id": publicID,
-		"status":     "queued",
-	})
-
-	writeJSON(w, http.StatusAccepted, map[string]any{
-		"project_id": publicID,
-		"status":     "queued",
+		"status":     "uploaded",
 	})
 }
 
@@ -261,10 +241,10 @@ func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items":      items,
-		"total":      total,
-		"page":       page,
-		"page_size":  pageSize,
+		"items":       items,
+		"total":       total,
+		"page":        page,
+		"page_size":   pageSize,
 		"total_pages": (total + int64(pageSize) - 1) / int64(pageSize),
 	})
 }
@@ -361,6 +341,10 @@ type createUserRequest struct {
 
 type attachUserRequest struct {
 	UserID string `json:"user_id"`
+}
+
+type runStepRequest struct {
+	Parameters map[string]any `json:"parameters"`
 }
 
 func (s *Server) handleResolveUser(w http.ResponseWriter, r *http.Request) {
@@ -501,15 +485,130 @@ func (s *Server) handleInternalFilesUpdate(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid payload"})
 		return
 	}
-	for i := range req.Files {
-		req.Files[i].ProjectID = projectID
+
+	project, err := s.repo.GetProjectByID(r.Context(), projectID)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, repository.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		writeJSON(w, status, map[string]string{"error": "project not found"})
+		return
 	}
 
-	if err := s.repo.ReplaceProjectFiles(r.Context(), projectID, req.Files); err != nil {
+	files := make([]repository.ProjectFile, 0, len(req.Files)+1)
+	files = append(files, buildOriginalProjectFile(project))
+	files = append(files, req.Files...)
+	files = dedupeProjectFiles(files)
+	for i := range files {
+		files[i].ProjectID = projectID
+	}
+
+	if err := s.repo.ReplaceProjectFiles(r.Context(), projectID, files); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to update files"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleRunProjectStep(w http.ResponseWriter, r *http.Request) {
+	publicID := chi.URLParam(r, "publicID")
+
+	step, err := strconv.Atoi(chi.URLParam(r, "step"))
+	if err != nil || step < 1 || step > 6 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "step must be between 1 and 6"})
+		return
+	}
+
+	project, err := s.repo.GetProjectByPublicID(r.Context(), publicID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+		return
+	}
+
+	var req runStepRequest
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.Parameters == nil {
+		req.Parameters = map[string]any{}
+	}
+
+	projectRoot := filepath.Join(s.cfg.StorageRoot, "projects", publicID)
+
+	payload := map[string]any{
+		"type":          "run_step",
+		"step":          step,
+		"project_id":    project.ID.String(),
+		"public_id":     publicID,
+		"project_root":  projectRoot,
+		"input_path":    project.OriginalFilePath,
+		"parameters":    req.Parameters,
+		"created_at":    time.Now().UTC().Format(time.RFC3339),
+		"retry_count":   0,
+		"max_retries":   2,
+		"callback_base": fmt.Sprintf("http://backend:%s/api/internal", s.cfg.HTTPPort),
+	}
+
+	if err := s.queue.Enqueue(r.Context(), payload); err != nil {
+		if errors.Is(err, service.ErrQueueFull) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "queue is full, please try again later"})
+			return
+		}
+
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to enqueue step"})
+		return
+	}
+
+	status := fmt.Sprintf("step_%d_queued", step)
+
+	_ = s.repo.UpdateProjectStatus(r.Context(), project.ID, status, false)
+
+	_ = s.events.Publish(r.Context(), map[string]any{
+		"type":       "status_changed",
+		"project_id": publicID,
+		"status":     status,
+		"step":       step,
+	})
+
+	writeJSON(w, http.StatusAccepted, map[string]any{
+		"project_id": publicID,
+		"step":       step,
+		"status":     status,
+	})
+}
+
+func buildOriginalProjectFile(project repository.Project) repository.ProjectFile {
+	sizeBytes := int64(0)
+	if info, err := os.Stat(project.OriginalFilePath); err == nil {
+		sizeBytes = info.Size()
+	}
+
+	return repository.ProjectFile{
+		FileType:  "original_upload",
+		Filename:  project.OriginalFilename,
+		FilePath:  project.OriginalFilePath,
+		MimeType:  service.MimeFromFilename(project.OriginalFilename),
+		SizeBytes: sizeBytes,
+	}
+}
+
+func dedupeProjectFiles(files []repository.ProjectFile) []repository.ProjectFile {
+	seen := make(map[string]struct{}, len(files))
+	out := make([]repository.ProjectFile, 0, len(files))
+	for _, f := range files {
+		key := f.FilePath
+		if key == "" {
+			key = f.FileType + "|" + f.Filename
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (s *Server) requireInternalSecret(next http.Handler) http.Handler {
@@ -524,12 +623,12 @@ func (s *Server) requireInternalSecret(next http.Handler) http.Handler {
 
 func validateImageFile(fh *multipart.FileHeader) error {
 	ext := strings.ToLower(filepath.Ext(fh.Filename))
-	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" {
-		return errors.New("only PNG and JPEG images are allowed")
+	if ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".webp" {
+		return errors.New("only PNG, JPEG, and WEBP images are allowed")
 	}
 	mimeType := strings.ToLower(fh.Header.Get("Content-Type"))
-	if mimeType != "image/png" && mimeType != "image/jpeg" {
-		return errors.New("unsupported MIME type, only image/png and image/jpeg are accepted")
+	if mimeType != "image/png" && mimeType != "image/jpeg" && mimeType != "image/webp" {
+		return errors.New("unsupported MIME type, only image/png, image/jpeg, and image/webp are accepted")
 	}
 	return nil
 }

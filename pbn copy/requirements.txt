@@ -6,3 +6,4 @@ scipy
 pillow
 reportlab
 redis
+pyyaml

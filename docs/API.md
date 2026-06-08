@@ -132,9 +132,9 @@ Request:
 {
   "files": [
     {
-      "file_type": "preview_color",
-      "filename": "preview_color.png",
-      "file_path": "/storage/projects/.../generated/preview_color.png",
+      "file_type": "pbn_numbered",
+      "filename": "pbn_numbered.png",
+      "file_path": "/storage/projects/.../generated/pbn_numbered.png",
       "mime_type": "image/png",
       "size_bytes": 12345
     }

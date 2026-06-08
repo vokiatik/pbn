@@ -43,15 +43,32 @@ services:
       STORAGE_ROOT: /storage
       PUBLIC_ID_LENGTH: "12"
       INTERNAL_API_SECRET: local-dev-secret
+      PYTHON_RUNNER_BASE_URL: http://pbn:8081
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      pbn:
+        condition: service_started
     volumes:
       - storage_data:/storage
     ports:
       - "8080:8080"
+
+  pbn:
+    build:
+      context: .
+      dockerfile: pbn/Dockerfile
+    environment:
+      PROJECTS_DIR: /storage/projects
+      SAM2_CHECKPOINT: /app/checkpoints/sam2.1_hiera_base_plus.pt
+      SAM2_MODEL_CFG: configs/sam2.1/sam2.1_hiera_b+.yaml
+    volumes:
+      - storage_data:/storage
+    ports:
+      - "8081:8081"
+    shm_size: "2gb"
 
   worker:
     build:
@@ -65,12 +82,15 @@ services:
       REDIS_EVENTS_CHANNEL: pbn:events
       WORKER_CONCURRENCY: "3"
       BACKEND_INTERNAL_BASE: http://backend:8080/api/internal
+      PYTHON_RUNNER_BASE_URL: http://pbn:8081
       INTERNAL_API_SECRET: local-dev-secret
     depends_on:
       backend:
         condition: service_started
       redis:
         condition: service_healthy
+      pbn:
+        condition: service_started
     volumes:
       - storage_data:/storage
 

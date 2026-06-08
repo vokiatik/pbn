@@ -18,30 +18,32 @@ React frontend
 - redis: queue, live status, pub/sub
 - worker: Python queue consumer that runs the existing pipeline in `main.py`
 
+
 ## Existing Processing Pipeline Reused
 
-No algorithm rewrite was introduced.
+Worker now calls the fixed-palette pipeline entry point:
+- `PBNPipeline(...).run(...)` in `pbn/pipeline.py`
 
-Worker calls the existing entry point:
-- `run(config: PipelineConfig)` in `main.py`
-
-Known processing stages detected from existing logs:
-1. Loading + preprocessing image
-2. Building edge map
-3. Superpixel segmentation
-4. Palette clustering + initial assignment
-5. Importance map + safe region merging
-6. Raster cleanup + previews
-7. Line art + numbers + metadata
-8. Saving outputs
+Known processing stages:
+1. Loading image
+2. Resizing image
+3. Edge-preserving smoothing
+4. Converting RGB to CIELAB
+5. SLIC superpixel segmentation
+6. Palette matching in LAB
+7. Connected component cleanup
+8. Contour extraction + number placement
+9. Rendering outputs
+10. Exporting files
 
 Generated files detected and persisted:
-- `preview_color.png`
-- `pbn_lines.png`
-- `palette.png`
+- `colored_preview.png`
+- `pbn_outline.png`
+- `pbn_numbered.png`
+- `pbn_vector.svg`
 - `palette.json`
 - `regions.json`
-- optional `paint_by_numbers.pdf`
+- `final_print.pdf`
 
 ## Storage Layout
 
@@ -131,3 +133,24 @@ python main.py input/photo.jpg --out output --colors 32 --size 2200
 ```
 
 The web platform integration uses the same Python code path through the worker.
+
+## Automatic Fixed-Palette PBN Pipeline
+
+This project now also includes a local automatic pipeline using a fixed 20-color palette and YAML configuration.
+
+Run:
+
+```bash
+python generate_pbn.py input.jpg --config config.yaml --out output_folder
+```
+
+Generated files:
+
+- `colored_preview.png`
+- `pbn_outline.png`
+- `pbn_numbered.png`
+- `pbn_vector.svg`
+- `palette.json`
+- `final_print.pdf`
+
+The command runs fully local and does not use cloud APIs.
