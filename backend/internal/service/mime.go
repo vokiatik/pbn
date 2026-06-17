@@ -17,7 +17,12 @@ func MimeFromFilename(name string) string {
 		return "application/json"
 	case strings.HasSuffix(n, ".pdf"):
 		return "application/pdf"
+	case strings.HasSuffix(n, ".heic"):
+		return "image/heic"
+	case strings.HasSuffix(n, ".heif"):
+		return "image/heif"
 	default:
 		return "application/octet-stream"
 	}
+
 }

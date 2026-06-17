@@ -2,7 +2,7 @@ import { AppBar, Box, Button, Container, Toolbar, Typography } from "@mui/materi
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { UploadPage } from "./pages/UploadPage";
 import RequestsListPage from "./pages/RequestsListPage";
-import { ProjectDetailsPageNew } from "./pages/UploadWithSteps";
+import { ProjectDetailsPage } from "./pages/ProjectDetailsPage";
 
 export default function App() {
     return (
@@ -28,7 +28,7 @@ export default function App() {
                     <Route path="/" element={<Navigate to="/upload" replace />} />
                     <Route path="/upload" element={<UploadPage />} />
                     <Route path="/projects" element={<RequestsListPage />} />
-                    <Route path="/projects/:publicId" element={<ProjectDetailsPageNew />} />
+                    <Route path="/projects/:publicId" element={<ProjectDetailsPage />} />
                 </Routes>
             </Container>
         </Box>

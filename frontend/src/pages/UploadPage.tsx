@@ -2,15 +2,13 @@ import { Alert, Box, Button, CircularProgress, Paper, Typography } from "@mui/ma
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadProject } from "../api/client";
-const validExt = [".png", ".jpg", ".jpeg", ".webp"];
-const validMime = ["image/png", "image/jpeg", "image/webp"];
+const validExt = [".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"];
 
 function validateFile(file: File): string | null {
     const lower = file.name.toLowerCase();
     const hasValidExt = validExt.some((ext) => lower.endsWith(ext));
 
-    if (!hasValidExt) return "Only PNG, JPG/JPEG, and WEBP files are allowed.";
-    if (!validMime.includes(file.type)) return "Unsupported MIME type. Please upload a PNG, JPEG, or WEBP image.";
+    if (!hasValidExt) return "Only PNG, JPG/JPEG, WEBP, HEIC, and HEIF files are allowed.";
 
     return null;
 }
@@ -75,7 +73,7 @@ export function UploadPage() {
                 }}
             >
                 <Typography variant="h6" gutterBottom>
-                    Drop PNG, JPEG, or WEBP here
+                    Drop PNG, JPEG, HEIC, HEIF or WEBP here
                 </Typography>
 
                 <Typography mb={2}>or</Typography>
@@ -85,7 +83,7 @@ export function UploadPage() {
                     <input
                         hidden
                         type="file"
-                        accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                        accept=".png,.jpg,.jpeg,.webp,.heic,.heif,image/png,image/jpeg,image/webp,image/heic,image/heif"
                         onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) void startUpload(file);

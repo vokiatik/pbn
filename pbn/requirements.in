@@ -9,6 +9,8 @@ scikit-learn
 scipy
 torch
 sam2
+pillow 
+pillow-heif
 
 redis
 psycopg[binary]
