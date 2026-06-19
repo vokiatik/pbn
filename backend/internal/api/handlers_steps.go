@@ -101,26 +101,6 @@ func (s *Server) handleInternalStatusUpdate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	project, err := s.repo.GetProjectByID(r.Context(), projectID)
-	if err == nil {
-		step, phase, hasStep := parseStepStatus(req.Status)
-		eventType := eventTypeForStatus(req.Status, req.Progress)
-
-		payload := map[string]any{
-			"type":       eventType,
-			"project_id": project.PublicID,
-			"status":     req.Status,
-			"value":      req.Progress,
-			"message":    req.Message,
-		}
-		if hasStep {
-			payload["step"] = step
-			payload["phase"] = phase
-		}
-
-		_ = s.events.Publish(r.Context(), payload)
-	}
-
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -136,36 +116,6 @@ func parseStepStatus(status string) (step int, phase string, ok bool) {
 	}
 
 	return step, parts[2], true
-}
-
-func eventTypeForStatus(status string, progress int) string {
-	if _, phase, ok := parseStepStatus(status); ok {
-		switch phase {
-		case "completed":
-			return "step_completed"
-		case "failed":
-			return "failed"
-		case "processing":
-			if progress > 0 {
-				return "progress"
-			}
-			return "status_changed"
-		default:
-			return "status_changed"
-		}
-	}
-
-	switch status {
-	case "completed":
-		return "completed"
-	case "failed":
-		return "failed"
-	default:
-		if progress > 0 {
-			return "progress"
-		}
-		return "status_changed"
-	}
 }
 
 func statusMarksProjectDone(status string) bool {

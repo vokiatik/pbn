@@ -117,6 +117,9 @@ These endpoints are called by the Python worker and require header:
 - X-Internal-Secret: must match INTERNAL_API_SECRET
 
 ### POST /api/internal/projects/{id}/status
+Updates the canonical project status. Worker Redis/WebSocket notifications are
+published by the worker after related status and file updates succeed.
+
 Request:
 ```
 {
@@ -127,6 +130,9 @@ Request:
 ```
 
 ### POST /api/internal/projects/{id}/files
+Replaces registered project files by stable `file_type` and returns canonical
+database records with file IDs.
+
 Request:
 ```
 {
@@ -152,24 +158,36 @@ Example events:
 {
   "type": "status_changed",
   "project_id": "...",
-  "status": "processing"
+  "status": "step_2_processing",
+  "step": 2
 }
 ```
 
 ```
 {
-  "type": "progress",
+  "type": "step_completed",
   "project_id": "...",
-  "status": "processing",
-  "value": 65,
-  "message": "[5/8] Importance map + safe region merging"
+  "status": "step_2_completed",
+  "step": 2,
+  "value": 25,
+  "files": [
+    {
+      "id": "file-uuid",
+      "file_type": "step2_smoothed",
+      "filename": "step2_smoothed.png",
+      "mime_type": "image/png"
+    }
+  ]
 }
 ```
 
 ```
 {
-  "type": "completed",
+  "type": "step_completed",
   "project_id": "...",
+  "status": "completed",
+  "step": 8,
+  "value": 100,
   "files": []
 }
 ```

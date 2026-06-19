@@ -146,6 +146,15 @@ export function useProjectDetails(publicId: string) {
 
                 if (payload.project_id && payload.project_id !== publicId) return;
 
+                const eventStep = typeof payload.step === "number" ? clampStep(payload.step) : null;
+                console.info("[pbn:ws] received event", {
+                    type: payload.type,
+                    project_id: payload.project_id,
+                    status: payload.status,
+                    step: eventStep,
+                    file_count: payload.files?.length ?? 0,
+                });
+
                 if (typeof payload.value === "number") {
                     setProgress(payload.value);
                 }
@@ -176,8 +185,18 @@ export function useProjectDetails(publicId: string) {
 
                 if (payload.type === "step_completed" || payload.type === "completed") {
                     setPreviewLoading(false);
+                    const completedStep =
+                        getCompletedStepFromStatus(payload.status) ?? eventStep ?? lastRunStepRef.current;
 
-                    void reloadAfterStepCompleted(payload.status, lastRunStepRef.current).catch((e) =>
+                    if (completedStep !== null) {
+                        setPreviewStep(completedStep);
+                        setActiveStep(
+                            completedStep >= MAX_STEP ? (MAX_STEP as StepId) : clampStep(completedStep + 1)
+                        );
+                        setPreviewVersion(Date.now());
+                    }
+
+                    void reloadAfterStepCompleted(payload.status, completedStep).catch((e) =>
                         setError(e instanceof Error ? e.message : "Failed to reload project")
                     );
                 }

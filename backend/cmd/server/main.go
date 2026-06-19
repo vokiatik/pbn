@@ -46,7 +46,7 @@ func main() {
 
 	repo := repository.NewPostgresRepository(pool)
 	queue := service.NewQueue(redisClient, cfg.QueueName, cfg.QueueMaxSize)
-	events := service.NewEventPublisher(redisClient, "pbn:events")
+	events := service.NewEventPublisher(redisClient, cfg.RedisEventsChannel)
 	server := api.NewServer(cfg, repo, queue, events, redisClient, logger)
 	server.StartRedisFanout(ctx)
 

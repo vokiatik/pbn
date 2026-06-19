@@ -13,8 +13,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const redisEventsChannel = "pbn:events"
-
 type Server struct {
 	cfg      config.Config
 	repo     *repository.PostgresRepository

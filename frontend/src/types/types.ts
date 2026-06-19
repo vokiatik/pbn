@@ -4,6 +4,7 @@ export type EventPayload = {
     type: string;
     project_id: string;
     status?: string;
+    step?: StepId;
     value?: number;
     message?: string;
     files?: ProjectFile[];

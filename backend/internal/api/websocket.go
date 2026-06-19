@@ -10,9 +10,11 @@ import (
 
 func (s *Server) StartRedisFanout(ctx context.Context) {
 	go func() {
-		pubsub := s.redis.Subscribe(ctx, redisEventsChannel)
+		channel := s.cfg.RedisEventsChannel
+		pubsub := s.redis.Subscribe(ctx, channel)
 		defer pubsub.Close()
 		ch := pubsub.Channel()
+		s.logger.Info("redis event fanout started", "channel", channel)
 
 		for {
 			select {
@@ -31,7 +33,30 @@ func (s *Server) StartRedisFanout(ctx context.Context) {
 					}
 				}
 
-				s.hub.Broadcast(projectID, []byte(msg.Payload))
+				eventType, _ := payload["type"].(string)
+				status, _ := payload["status"].(string)
+				step, _ := payload["step"].(float64)
+				fileCount := 0
+				if files, ok := payload["files"].([]any); ok {
+					fileCount = len(files)
+				}
+
+				s.logger.Info(
+					"redis event received",
+					"channel", msg.Channel,
+					"type", eventType,
+					"project_id", projectID,
+					"status", status,
+					"step", int(step),
+					"file_count", fileCount,
+				)
+				sent := s.hub.Broadcast(projectID, []byte(msg.Payload))
+				s.logger.Info(
+					"websocket event sent",
+					"type", eventType,
+					"project_id", projectID,
+					"subscriber_count", sent,
+				)
 			}
 		}
 	}()

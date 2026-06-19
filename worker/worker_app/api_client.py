@@ -26,25 +26,17 @@ class BackendInternalClient:
         progress: int = 0,
         message: str = "",
     ) -> None:
-        try:
-            requests.post(
-                f"{self.config.api_base}/projects/{project_id}/status",
-                headers=self._headers,
-                timeout=15,
-                json={
-                    "status": status,
-                    "progress": progress,
-                    "message": message,
-                },
-            ).raise_for_status()
-        except Exception:
-            logger.exception(
-                "failed to post status project_id=%s status=%s progress=%s message=%s",
-                project_id,
-                status,
-                progress,
-                message,
-            )
+        response = requests.post(
+            f"{self.config.api_base}/projects/{project_id}/status",
+            headers=self._headers,
+            timeout=15,
+            json={
+                "status": status,
+                "progress": progress,
+                "message": message,
+            },
+        )
+        response.raise_for_status()
 
     def post_files(self, project_id: str, files: list[FileRecord]) -> list[FileRecord]:
         """Register files in backend and return backend-saved records.

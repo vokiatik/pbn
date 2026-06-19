@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"time"
 
 	"pbn/backend/internal/repository"
 
@@ -102,13 +101,6 @@ func (s *Server) handleInternalFilesUpdate(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to reload files"})
 		return
 	}
-
-	_ = s.events.Publish(r.Context(), map[string]any{
-		"type":       "files_updated",
-		"project_id": project.PublicID,
-		"files":      savedFiles,
-		"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
-	})
 
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",

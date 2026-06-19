@@ -103,23 +103,23 @@ class JobProcessor:
         final_completed_status = "completed" if step == 8 else completed_status
         progress = STEP_PROGRESS.get(step, 0)
 
-        self.backend.post_status(
-            project_id,
-            processing_status,
-            max(progress - 10, 1),
-            f"step {step} started",
-        )
-
-        self.events.publish(
-            {
-                "type": "status_changed",
-                "project_id": public_id,
-                "status": processing_status,
-                "step": step,
-            }
-        )
-
         try:
+            self.backend.post_status(
+                project_id,
+                processing_status,
+                max(progress - 10, 1),
+                f"step {step} started",
+            )
+
+            self.events.publish(
+                {
+                    "type": "status_changed",
+                    "project_id": public_id,
+                    "status": processing_status,
+                    "step": step,
+                }
+            )
+
             runner_response = self.runner.run_step(
                 step=step,
                 project_id=project_id,
@@ -129,17 +129,6 @@ class JobProcessor:
 
             local_files = public_step_files(project_root, step)
             saved_files = self.backend.post_files(project_id, local_files) if local_files else []
-
-            if saved_files:
-                self.events.publish(
-                    {
-                        "type": "files_updated",
-                        "project_id": public_id,
-                        "status": processing_status,
-                        "step": step,
-                        "files": saved_files,
-                    }
-                )
 
             self.backend.post_status(
                 project_id,
@@ -159,16 +148,6 @@ class JobProcessor:
                     "runner_result": runner_response,
                 }
             )
-
-            if step == 8:
-                self.events.publish(
-                    {
-                        "type": "completed",
-                        "project_id": public_id,
-                        "status": "completed",
-                        "files": saved_files,
-                    }
-                )
 
         except Exception as exc:
             logger.exception("step job failed step=%s project_id=%s", step, project_id)

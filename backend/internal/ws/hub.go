@@ -32,13 +32,17 @@ func (h *Hub) Remove(conn *websocket.Conn) {
 	delete(h.clients, conn)
 }
 
-func (h *Hub) Broadcast(projectID string, payload []byte) {
+func (h *Hub) Broadcast(projectID string, payload []byte) int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	sent := 0
 	for _, sub := range h.clients {
 		if sub.ProjectID != "" && sub.ProjectID != projectID {
 			continue
 		}
-		_ = sub.Conn.WriteMessage(websocket.TextMessage, payload)
+		if err := sub.Conn.WriteMessage(websocket.TextMessage, payload); err == nil {
+			sent++
+		}
 	}
+	return sent
 }
