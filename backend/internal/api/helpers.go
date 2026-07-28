@@ -22,7 +22,7 @@ func buildOriginalProjectFile(project repository.Project) repository.ProjectFile
 	}
 
 	return repository.ProjectFile{
-		FileType:  "original_upload",
+		FileType:  "original",
 		Filename:  project.OriginalFilename,
 		FilePath:  project.OriginalFilePath,
 		MimeType:  service.MimeFromFilename(project.OriginalFilename),

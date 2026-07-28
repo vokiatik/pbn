@@ -18,17 +18,23 @@ import StatusChip from "../components/StatusChip";
 
 function getProjectPhase(status: string): string {
     if (status === "uploaded") return "Uploaded";
-    if (status === "completed") return "Completed";
-    if (status === "failed") return "Failed";
-
-    const match = status.match(/^step_(\d+)_(queued|processing|completed|failed)$/);
-
-    if (!match) return status;
-
-    const step = match[1];
-    const phase = match[2];
-
-    return `Step ${step} ${phase}`;
+    if (status === "ai_queued") return "Queued";
+    if (status === "ai_processing") return "Generating";
+    if (status === "ai_image_queued") return "AI image queued";
+    if (status === "ai_image_processing") return "Generating AI image";
+    if (status === "ai_image_ready") return "Review AI image";
+    if (status === "pbn_queued") return "PBN queued";
+    if (status === "pbn_processing") return "Generating PBN";
+    if (status === "pbn_options_queued") return "PBN options queued";
+    if (status === "pbn_options_processing") return "Generating difficulty options";
+    if (status === "pbn_options_ready") return "Choose difficulty";
+    if (status === "pbn_selection_queued") return "Selection queued";
+    if (status === "pbn_selection_processing") return "Creating printable files";
+    if (status === "pbn_selection_failed") return "Selection failed";
+    if (status === "pbn_failed") return "PBN failed";
+    if (status === "ai_completed") return "Completed";
+    if (status === "ai_failed") return "Failed";
+    return status;
 }
 
 export default function RequestsListPage() {
@@ -39,10 +45,8 @@ export default function RequestsListPage() {
 
     const load = async (targetPage: number) => {
         setLoading(true);
-
         try {
             const data = await listProjects(targetPage, 10);
-
             setItems(data.items);
             setTotalPages(data.total_pages || 1);
             setPage(targetPage);
@@ -67,24 +71,13 @@ export default function RequestsListPage() {
                         <CircularProgress />
                     </Stack>
                 ) : (
-                    <Table
-                        sx={{
-                            width: "100%",
-                            tableLayout: "fixed",
-                            "& .MuiTableCell-root": {
-                                whiteSpace: "normal",
-                                overflowWrap: "anywhere",
-                                wordBreak: "break-word",
-                                verticalAlign: "top",
-                            },
-                        }}
-                    >
+                    <Table sx={{ width: "100%", tableLayout: "fixed" }}>
                         <TableHead>
                             <TableRow>
                                 <TableCell>Project ID</TableCell>
                                 <TableCell>User</TableCell>
                                 <TableCell>Status</TableCell>
-                                <TableCell>Pipeline</TableCell>
+                                <TableCell>Phase</TableCell>
                                 <TableCell>Upload Date</TableCell>
                                 <TableCell>Completion Date</TableCell>
                                 <TableCell>Files</TableCell>
@@ -98,42 +91,21 @@ export default function RequestsListPage() {
                                 <TableRow key={project.id} hover>
                                     <TableCell>{project.public_id}</TableCell>
                                     <TableCell>{project.username || "-"}</TableCell>
-
                                     <TableCell>
                                         <StatusChip status={project.status} />
                                     </TableCell>
-
                                     <TableCell>{getProjectPhase(project.status)}</TableCell>
-
+                                    <TableCell>{new Date(project.created_at).toLocaleString()}</TableCell>
                                     <TableCell>
-                                        {new Date(project.created_at).toLocaleString()}
+                                        {project.completed_at ? new Date(project.completed_at).toLocaleString() : "-"}
                                     </TableCell>
-
-                                    <TableCell>
-                                        {project.completed_at
-                                            ? new Date(project.completed_at).toLocaleString()
-                                            : "-"}
-                                    </TableCell>
-
                                     <TableCell>{project.files_count}</TableCell>
                                     <TableCell>{project.original_filename}</TableCell>
-
                                     <TableCell align="right">
-                                        <Stack
-                                            direction={{ xs: "column", sm: "row" }}
-                                            spacing={1}
-                                            justifyContent="flex-end"
-                                            alignItems="flex-end"
-                                        >
-                                            <Button
-                                                component={Link}
-                                                to={`/projects/${project.public_id}`}
-                                                size="small"
-                                                variant="outlined"
-                                            >
+                                        <Stack direction={{ xs: "column", sm: "row" }} spacing={1} justifyContent="flex-end">
+                                            <Button component={Link} to={`/projects/${project.public_id}`} size="small" variant="outlined">
                                                 Open
                                             </Button>
-
                                             <Button
                                                 size="small"
                                                 color="error"
@@ -157,11 +129,9 @@ export default function RequestsListPage() {
                 <Button disabled={page <= 1} onClick={() => void load(page - 1)}>
                     Prev
                 </Button>
-
                 <Typography sx={{ alignSelf: "center" }}>
                     {page} / {totalPages}
                 </Typography>
-
                 <Button disabled={page >= totalPages} onClick={() => void load(page + 1)}>
                     Next
                 </Button>

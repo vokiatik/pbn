@@ -34,14 +34,22 @@ func (h *Hub) Remove(conn *websocket.Conn) {
 
 func (h *Hub) Broadcast(projectID string, payload []byte) int {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-	sent := 0
+	targets := make([]Subscription, 0, len(h.clients))
 	for _, sub := range h.clients {
 		if sub.ProjectID != "" && sub.ProjectID != projectID {
 			continue
 		}
+		targets = append(targets, sub)
+	}
+	h.mu.RUnlock()
+
+	sent := 0
+	for _, sub := range targets {
 		if err := sub.Conn.WriteMessage(websocket.TextMessage, payload); err == nil {
 			sent++
+		} else {
+			h.Remove(sub.Conn)
+			_ = sub.Conn.Close()
 		}
 	}
 	return sent

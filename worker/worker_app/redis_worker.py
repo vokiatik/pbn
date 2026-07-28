@@ -17,7 +17,6 @@ from .runner_client import PythonRunnerClient
 
 logger = logging.getLogger(__name__)
 
-
 def create_redis_client(config: WorkerConfig) -> Redis:
     return Redis(
         host=config.redis_addr,
@@ -39,6 +38,10 @@ def worker_loop(worker_name: str, config: WorkerConfig) -> None:
 
     while True:
         try:
+            if not runner.is_ready():
+                logger.info("runner is not ready; waiting before consuming jobs")
+                time.sleep(2)
+                continue
             item = redis_client.blpop(config.queue_name, timeout=5)
             if not item:
                 continue

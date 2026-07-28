@@ -2,16 +2,22 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from runner_app.config import PROJECTS_DIR, SAM2_CHECKPOINT, SAM2_MODEL_CFG
+from runner_app.config import PROJECTS_DIR
 from runner_app.models import (
-    RunStepRequest,
-    RunStepResponse,
+    ContinueAIPipelineRequest,
+    ContinueAIPipelineResponse,
+    FinalizePBNOptionRequest,
+    FinalizePBNOptionResponse,
+    GenerateAIImageRequest,
+    GenerateAIImageResponse,
+    RunAIPipelineRequest,
+    RunAIPipelineResponse,
     UploadPreviewRequest,
     UploadPreviewResponse,
 )
+from runner_app.ai_service import continue_ai_project_pipeline, finalize_pbn_project_option, generate_ai_project_image, run_ai_project_pipeline
 from runner_app.preview import create_upload_preview, upload_preview_result
-from runner_app.step_service import run_project_step
-from runner_app.utils import find_original_image, get_project_dir_by_ids
+from runner_app.utils import get_project_dir_by_ids, resolve_original_image
 
 router = APIRouter()
 
@@ -21,15 +27,13 @@ def health() -> dict[str, Any]:
     return {
         "ok": True,
         "projects_dir": str(PROJECTS_DIR),
-        "sam2_checkpoint": SAM2_CHECKPOINT,
-        "sam2_model_cfg": SAM2_MODEL_CFG,
     }
 
 
 @router.post("/generate-upload-preview", response_model=UploadPreviewResponse)
 def generate_upload_preview(req: UploadPreviewRequest) -> UploadPreviewResponse:
     project_dir = get_project_dir_by_ids(req.project_id, req.public_id)
-    original_image = find_original_image(project_dir)
+    original_image = resolve_original_image(project_dir, req.input_path)
 
     preview_path = create_upload_preview(
         original_image=original_image,
@@ -46,6 +50,21 @@ def generate_upload_preview(req: UploadPreviewRequest) -> UploadPreviewResponse:
     )
 
 
-@router.post("/run-step/{step}", response_model=RunStepResponse)
-def run_step(step: int, req: RunStepRequest) -> RunStepResponse:
-    return run_project_step(step, req)
+@router.post("/run-ai-pipeline", response_model=RunAIPipelineResponse)
+def run_ai_pipeline(req: RunAIPipelineRequest) -> RunAIPipelineResponse:
+    return run_ai_project_pipeline(req)
+
+
+@router.post("/generate-ai-image", response_model=GenerateAIImageResponse)
+def generate_ai_image(req: GenerateAIImageRequest) -> GenerateAIImageResponse:
+    return generate_ai_project_image(req)
+
+
+@router.post("/continue-ai-pipeline", response_model=ContinueAIPipelineResponse)
+def continue_ai_pipeline(req: ContinueAIPipelineRequest) -> ContinueAIPipelineResponse:
+    return continue_ai_project_pipeline(req)
+
+
+@router.post("/finalize-pbn-option", response_model=FinalizePBNOptionResponse)
+def finalize_pbn_option(req: FinalizePBNOptionRequest) -> FinalizePBNOptionResponse:
+    return finalize_pbn_project_option(req)

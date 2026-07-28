@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -13,19 +14,25 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Project struct {
-	ID               uuid.UUID  `json:"id"`
-	PublicID         string     `json:"public_id"`
-	UserID           *uuid.UUID `json:"user_id,omitempty"`
-	Username         string     `json:"username"`
-	ClientToken      string     `json:"client_token"`
-	OriginalFilename string     `json:"original_filename"`
-	OriginalFilePath string     `json:"original_file_path"`
-	Status           string     `json:"status"`
-	CreatedAt        time.Time  `json:"created_at"`
-	UpdatedAt        time.Time  `json:"updated_at"`
-	CompletedAt      *time.Time `json:"completed_at,omitempty"`
-	DeletedAt        *time.Time `json:"deleted_at,omitempty"`
-	FilesCount       int        `json:"files_count"`
+	ID               uuid.UUID       `json:"id"`
+	PublicID         string          `json:"public_id"`
+	UserID           *uuid.UUID      `json:"user_id,omitempty"`
+	Username         string          `json:"username"`
+	ClientToken      string          `json:"-"`
+	OriginalFilename string          `json:"original_filename"`
+	OriginalFilePath string          `json:"original_file_path"`
+	PipelineVersion  string          `json:"pipeline_version"`
+	AISettings       json.RawMessage `json:"ai_settings"`
+	AIQuality        json.RawMessage `json:"ai_quality"`
+	PBNOptions       json.RawMessage `json:"pbn_options"`
+	SelectedPBN      *string         `json:"selected_pbn_difficulty,omitempty"`
+	Status           string          `json:"status"`
+	ErrorMessage     *string         `json:"error_message,omitempty"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	CompletedAt      *time.Time      `json:"completed_at,omitempty"`
+	DeletedAt        *time.Time      `json:"deleted_at,omitempty"`
+	FilesCount       int             `json:"files_count"`
 }
 
 type ProjectFile struct {
@@ -54,7 +61,12 @@ type ProjectRepository interface {
 	GetProjectByID(ctx context.Context, id uuid.UUID) (Project, error)
 	ListProjects(ctx context.Context, page int, pageSize int) ([]Project, int64, error)
 	CountActiveByClientToken(ctx context.Context, clientToken string) (int, error)
-	UpdateProjectStatus(ctx context.Context, projectID uuid.UUID, status string, completed bool) error
+	UpdateProjectStatus(ctx context.Context, projectID uuid.UUID, status string, completed bool, errorMessage *string) error
+	UpdateProjectAISettings(ctx context.Context, projectID uuid.UUID, settings json.RawMessage) error
+	UpdateProjectAIQuality(ctx context.Context, projectID uuid.UUID, quality json.RawMessage) error
+	UpdateProjectPBNOptions(ctx context.Context, projectID uuid.UUID, options json.RawMessage) error
+	UpdateSelectedPBNDifficulty(ctx context.Context, projectID uuid.UUID, difficulty *string) error
+	ReplaceProjectOriginal(ctx context.Context, projectID uuid.UUID, originalFilename string, originalFilePath string, files []ProjectFile) error
 	SoftDeleteProject(ctx context.Context, publicID string) error
 	ReplaceProjectFiles(ctx context.Context, projectID uuid.UUID, files []ProjectFile) error
 	ListProjectFiles(ctx context.Context, projectID uuid.UUID) ([]ProjectFile, error)
@@ -78,9 +90,9 @@ func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 func (r *PostgresRepository) CreateProject(ctx context.Context, p Project) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO projects (
-			id, public_id, user_id, client_token, original_filename, original_file_path, status
-		) VALUES ($1,$2,$3,$4,$5,$6,$7)
-	`, p.ID, p.PublicID, p.UserID, p.ClientToken, p.OriginalFilename, p.OriginalFilePath, p.Status)
+			id, public_id, user_id, client_token, original_filename, original_file_path, pipeline_version, status
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	`, p.ID, p.PublicID, p.UserID, p.ClientToken, p.OriginalFilename, p.OriginalFilePath, p.PipelineVersion, p.Status)
 	return err
 }
 
@@ -88,14 +100,14 @@ func (r *PostgresRepository) GetProjectByPublicID(ctx context.Context, publicID 
 	var p Project
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.id, p.public_id, p.user_id, COALESCE(u.username,''), COALESCE(p.client_token,''), p.original_filename,
-			p.original_file_path, p.status, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
+			p.original_file_path, p.pipeline_version, p.ai_settings, p.ai_quality, p.pbn_options, p.selected_pbn_difficulty, p.status, p.error_message, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
 			(SELECT COUNT(*) FROM project_files pf WHERE pf.project_id = p.id)
 		FROM projects p
 		LEFT JOIN users u ON u.id = p.user_id
 		WHERE p.public_id=$1
 	`, publicID).Scan(
 		&p.ID, &p.PublicID, &p.UserID, &p.Username, &p.ClientToken, &p.OriginalFilename,
-		&p.OriginalFilePath, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
+		&p.OriginalFilePath, &p.PipelineVersion, &p.AISettings, &p.AIQuality, &p.PBNOptions, &p.SelectedPBN, &p.Status, &p.ErrorMessage, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
 		&p.FilesCount,
 	)
 	if err != nil {
@@ -111,14 +123,14 @@ func (r *PostgresRepository) GetProjectByID(ctx context.Context, id uuid.UUID) (
 	var p Project
 	err := r.pool.QueryRow(ctx, `
 		SELECT p.id, p.public_id, p.user_id, COALESCE(u.username,''), COALESCE(p.client_token,''), p.original_filename,
-			p.original_file_path, p.status, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
+			p.original_file_path, p.pipeline_version, p.ai_settings, p.ai_quality, p.pbn_options, p.selected_pbn_difficulty, p.status, p.error_message, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
 			(SELECT COUNT(*) FROM project_files pf WHERE pf.project_id = p.id)
 		FROM projects p
 		LEFT JOIN users u ON u.id = p.user_id
 		WHERE p.id=$1
 	`, id).Scan(
 		&p.ID, &p.PublicID, &p.UserID, &p.Username, &p.ClientToken, &p.OriginalFilename,
-		&p.OriginalFilePath, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
+		&p.OriginalFilePath, &p.PipelineVersion, &p.AISettings, &p.AIQuality, &p.PBNOptions, &p.SelectedPBN, &p.Status, &p.ErrorMessage, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
 		&p.FilesCount,
 	)
 	if err != nil {
@@ -138,7 +150,7 @@ func (r *PostgresRepository) ListProjects(ctx context.Context, page int, pageSiz
 
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.public_id, p.user_id, COALESCE(u.username,''), COALESCE(p.client_token,''), p.original_filename,
-			p.original_file_path, p.status, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
+			p.original_file_path, p.pipeline_version, p.ai_settings, p.ai_quality, p.pbn_options, p.selected_pbn_difficulty, p.status, p.error_message, p.created_at, p.updated_at, p.completed_at, p.deleted_at,
 			(SELECT COUNT(*) FROM project_files pf WHERE pf.project_id = p.id)
 		FROM projects p
 		LEFT JOIN users u ON u.id = p.user_id
@@ -156,7 +168,7 @@ func (r *PostgresRepository) ListProjects(ctx context.Context, page int, pageSiz
 		var p Project
 		if err := rows.Scan(
 			&p.ID, &p.PublicID, &p.UserID, &p.Username, &p.ClientToken, &p.OriginalFilename,
-			&p.OriginalFilePath, &p.Status, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
+			&p.OriginalFilePath, &p.PipelineVersion, &p.AISettings, &p.AIQuality, &p.PBNOptions, &p.SelectedPBN, &p.Status, &p.ErrorMessage, &p.CreatedAt, &p.UpdatedAt, &p.CompletedAt, &p.DeletedAt,
 			&p.FilesCount,
 		); err != nil {
 			return nil, 0, err
@@ -179,12 +191,18 @@ func (r *PostgresRepository) CountActiveByClientToken(ctx context.Context, clien
 		FROM projects
 		WHERE deleted_at IS NULL
 			AND client_token = $1
-			AND status IN ('queued','processing')
+			AND (
+				status IN ('ai_queued','ai_processing','ai_image_queued','ai_image_processing','pbn_queued','pbn_processing','pbn_options_queued','pbn_options_processing','pbn_selection_queued','pbn_selection_processing')
+			)
 	`, clientToken).Scan(&count)
 	return count, err
 }
 
-func (r *PostgresRepository) UpdateProjectStatus(ctx context.Context, projectID uuid.UUID, status string, completed bool) error {
+func (r *PostgresRepository) UpdateProjectStatus(ctx context.Context, projectID uuid.UUID, status string, completed bool, errorMessage *string) error {
+	if errorMessage != nil {
+		return r.updateProjectStatusAndError(ctx, projectID, status, completed, *errorMessage)
+	}
+
 	if completed {
 		_, err := r.pool.Exec(ctx, `
 			UPDATE projects
@@ -195,10 +213,135 @@ func (r *PostgresRepository) UpdateProjectStatus(ctx context.Context, projectID 
 	}
 	_, err := r.pool.Exec(ctx, `
 		UPDATE projects
-		SET status=$2, updated_at=NOW()
+		SET status=$2, completed_at=NULL, updated_at=NOW()
 		WHERE id=$1
 	`, projectID, status)
 	return err
+}
+
+func (r *PostgresRepository) UpdateProjectAISettings(ctx context.Context, projectID uuid.UUID, settings json.RawMessage) error {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE projects
+		SET ai_settings=$2, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL
+	`, projectID, settings)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UpdateProjectAIQuality(ctx context.Context, projectID uuid.UUID, quality json.RawMessage) error {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE projects
+		SET ai_quality=$2, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL
+	`, projectID, quality)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UpdateProjectPBNOptions(ctx context.Context, projectID uuid.UUID, options json.RawMessage) error {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE projects
+		SET pbn_options=$2, selected_pbn_difficulty=NULL, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL
+	`, projectID, options)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) UpdateSelectedPBNDifficulty(ctx context.Context, projectID uuid.UUID, difficulty *string) error {
+	cmd, err := r.pool.Exec(ctx, `
+		UPDATE projects SET selected_pbn_difficulty=$2, updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL
+	`, projectID, difficulty)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *PostgresRepository) updateProjectStatusAndError(ctx context.Context, projectID uuid.UUID, status string, completed bool, errorMessage string) error {
+	if completed {
+		_, err := r.pool.Exec(ctx, `
+			UPDATE projects
+			SET status=$2, error_message=NULLIF($3, ''), completed_at=NOW(), updated_at=NOW()
+			WHERE id=$1
+		`, projectID, status, errorMessage)
+		return err
+	}
+	_, err := r.pool.Exec(ctx, `
+		UPDATE projects
+		SET status=$2, error_message=NULLIF($3, ''), completed_at=NULL, updated_at=NOW()
+		WHERE id=$1
+	`, projectID, status, errorMessage)
+	return err
+}
+
+func (r *PostgresRepository) ReplaceProjectOriginal(ctx context.Context, projectID uuid.UUID, originalFilename string, originalFilePath string, files []ProjectFile) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	cmd, err := tx.Exec(ctx, `
+		UPDATE projects
+		SET original_filename=$2,
+			original_file_path=$3,
+			ai_settings='{}'::jsonb,
+			ai_quality='{}'::jsonb,
+			pbn_options='[]'::jsonb,
+			selected_pbn_difficulty=NULL,
+			status='uploaded',
+			error_message=NULL,
+			completed_at=NULL,
+			updated_at=NOW()
+		WHERE id=$1 AND deleted_at IS NULL
+	`, projectID, originalFilename, originalFilePath)
+	if err != nil {
+		return err
+	}
+	if cmd.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+
+	if _, err := tx.Exec(ctx, "DELETE FROM project_files WHERE project_id=$1", projectID); err != nil {
+		return err
+	}
+
+	for _, f := range files {
+		if f.ID == uuid.Nil {
+			f.ID = uuid.New()
+		}
+		_, err := tx.Exec(ctx, `
+			INSERT INTO project_files (
+				id, project_id, file_type, filename, file_path, mime_type, size_bytes
+			) VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, f.ID, projectID, f.FileType, f.Filename, f.FilePath, f.MimeType, f.SizeBytes)
+		if err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *PostgresRepository) SoftDeleteProject(ctx context.Context, publicID string) error {

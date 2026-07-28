@@ -16,7 +16,6 @@ type Config struct {
 	QueueName          string
 	QueueMaxSize       int64
 	MaxActivePerUser   int
-	WebBaseURL         string
 	PublicIDLength     int
 	InternalAPISecret  string
 }
@@ -33,7 +32,6 @@ func Load() Config {
 		QueueName:          env("REDIS_QUEUE_NAME", "pbn:jobs"),
 		QueueMaxSize:       int64(envInt("QUEUE_MAX_SIZE", 20)),
 		MaxActivePerUser:   envInt("MAX_ACTIVE_PROJECTS_PER_CLIENT", 2),
-		WebBaseURL:         env("WEB_BASE_URL", "http://localhost:5173"),
 		PublicIDLength:     envInt("PUBLIC_ID_LENGTH", 12),
 		InternalAPISecret:  env("INTERNAL_API_SECRET", "local-dev-secret"),
 	}

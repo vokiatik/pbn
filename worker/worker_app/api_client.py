@@ -25,20 +25,30 @@ class BackendInternalClient:
         status: str,
         progress: int = 0,
         message: str = "",
-    ) -> None:
+        error_message: str = "",
+    ) -> bool:
+        payload: dict[str, int | str] = {
+            "status": status,
+            "progress": progress,
+            "message": message,
+            "error_message": error_message,
+        }
+
         response = requests.post(
             f"{self.config.api_base}/projects/{project_id}/status",
             headers=self._headers,
             timeout=15,
-            json={
-                "status": status,
-                "progress": progress,
-                "message": message,
-            },
+            json=payload,
         )
         response.raise_for_status()
+        response_payload: dict[str, Any] = response.json()
+        return response_payload.get("applied") is not False
 
-    def post_files(self, project_id: str, files: list[FileRecord]) -> list[FileRecord]:
+    def post_files(
+        self,
+        project_id: str,
+        files: list[FileRecord],
+    ) -> list[FileRecord]:
         """Register files in backend and return backend-saved records.
 
         This matters because local file records do not have DB IDs. The React preview URL
@@ -62,3 +72,30 @@ class BackendInternalClient:
 
         logger.warning("backend /files response did not include files; falling back to local records")
         return files
+
+    def post_pbn_options(self, project_id: str, options: list[dict[str, Any]]) -> None:
+        response = requests.post(
+            f"{self.config.api_base}/projects/{project_id}/pbn-options",
+            headers=self._headers,
+            timeout=30,
+            json={"options": options},
+        )
+        response.raise_for_status()
+
+    def post_ai_quality(self, project_id: str, quality: dict[str, Any]) -> None:
+        response = requests.post(
+            f"{self.config.api_base}/projects/{project_id}/ai-quality",
+            headers=self._headers,
+            timeout=30,
+            json={"quality": quality},
+        )
+        response.raise_for_status()
+
+    def post_pbn_selection(self, project_id: str, difficulty: str) -> None:
+        response = requests.post(
+            f"{self.config.api_base}/projects/{project_id}/pbn-selection",
+            headers=self._headers,
+            timeout=30,
+            json={"difficulty": difficulty},
+        )
+        response.raise_for_status()

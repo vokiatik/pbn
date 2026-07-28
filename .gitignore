@@ -41,6 +41,7 @@ worker/__pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/tsconfig.tsbuildinfo
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
@@ -58,3 +59,5 @@ logs/
 # Local generated assets and runtime folders
 input/
 output/
+storage/
+pbn/checkpoints/

@@ -80,3 +80,37 @@ def find_original_image(project_dir: Path) -> Path:
             "checked": [str(candidate) for candidate in candidates],
         },
     )
+
+
+def resolve_original_image(project_dir: Path, input_path: str | None = None) -> Path:
+    if not input_path:
+        return find_original_image(project_dir)
+
+    project_root = project_dir.resolve()
+    candidate = Path(input_path)
+    if not candidate.is_absolute():
+        candidate = project_dir / candidate
+    candidate = candidate.resolve()
+
+    try:
+        candidate.relative_to(project_root)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Input image must be inside the project directory",
+                "project_dir": str(project_root),
+                "input_path": str(candidate),
+            },
+        ) from exc
+
+    if not candidate.exists():
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "Input image not found",
+                "input_path": str(candidate),
+            },
+        )
+
+    return candidate

@@ -1,15 +1,14 @@
 import { Alert, Box, Button, CircularProgress, Paper, Typography } from "@mui/material";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { uploadProject } from "../api/client";
+
 const validExt = [".png", ".jpg", ".jpeg", ".webp", ".heic", ".heif"];
 
 function validateFile(file: File): string | null {
     const lower = file.name.toLowerCase();
     const hasValidExt = validExt.some((ext) => lower.endsWith(ext));
-
     if (!hasValidExt) return "Only PNG, JPG/JPEG, WEBP, HEIC, and HEIF files are allowed.";
-
     return null;
 }
 
@@ -21,7 +20,6 @@ export function UploadPage() {
 
     const startUpload = async (file: File) => {
         const msg = validateFile(file);
-
         if (msg) {
             setError(msg);
             return;
@@ -29,7 +27,6 @@ export function UploadPage() {
 
         setError(null);
         setIsUploading(true);
-
         try {
             const result = await uploadProject(file);
             navigate(`/projects/${result.project_id}`);
@@ -47,7 +44,7 @@ export function UploadPage() {
             </Typography>
 
             <Typography color="text.secondary" mb={3}>
-                Upload an image first. Generation will not start automatically; you will control every pipeline step.
+                Upload an image, then generate one AI-assisted paint-by-number result.
             </Typography>
 
             <Paper
@@ -107,3 +104,4 @@ export function UploadPage() {
         </Box>
     );
 }
+

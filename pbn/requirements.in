@@ -7,9 +7,6 @@ pillow
 scikit-image
 scikit-learn
 scipy
-torch
-sam2
-pillow 
 pillow-heif
 
 redis

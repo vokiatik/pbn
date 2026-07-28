@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 
 	"pbn/backend/internal/repository"
 
@@ -42,6 +43,13 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, inline bool) 
 		return
 	}
 
+	filePath, ok := s.safeProjectFilePath(project.PublicID, fileRec.FilePath)
+	if !ok {
+		s.logger.Warn("blocked project file outside storage root", "project_id", project.PublicID, "file_id", fileID)
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "file not found"})
+		return
+	}
+
 	disp := "attachment"
 	if inline {
 		disp = "inline"
@@ -50,7 +58,36 @@ func (s *Server) serveFile(w http.ResponseWriter, r *http.Request, inline bool) 
 
 	w.Header().Set("Content-Type", fileRec.MimeType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("%s; filename=%q", disp, fileRec.Filename))
-	http.ServeFile(w, r, fileRec.FilePath)
+	http.ServeFile(w, r, filePath)
+}
+
+func (s *Server) safeProjectFilePath(publicID string, rawPath string) (string, bool) {
+	projectRoot, err := filepath.Abs(filepath.Join(s.cfg.StorageRoot, "projects", publicID))
+	if err != nil {
+		return "", false
+	}
+
+	filePath, err := filepath.Abs(filepath.Clean(rawPath))
+	if err != nil {
+		return "", false
+	}
+
+	rel, err := filepath.Rel(projectRoot, filePath)
+	if err != nil {
+		return "", false
+	}
+
+	if rel == "." || rel == "" {
+		return "", false
+	}
+	if rel == ".." || len(rel) >= 3 && rel[:3] == ".."+string(filepath.Separator) {
+		return "", false
+	}
+	if filepath.IsAbs(rel) {
+		return "", false
+	}
+
+	return filePath, true
 }
 
 func (s *Server) handleInternalFilesUpdate(w http.ResponseWriter, r *http.Request) {
@@ -76,7 +113,6 @@ func (s *Server) handleInternalFilesUpdate(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, status, map[string]string{"error": "project not found"})
 		return
 	}
-
 	existing, _ := s.repo.ListProjectFiles(r.Context(), projectID)
 
 	files := make([]repository.ProjectFile, 0, len(existing)+len(req.Files)+1)
@@ -103,7 +139,8 @@ func (s *Server) handleInternalFilesUpdate(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"files":  savedFiles,
+		"status":  "ok",
+		"applied": true,
+		"files":   savedFiles,
 	})
 }

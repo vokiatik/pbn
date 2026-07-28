@@ -18,25 +18,33 @@ export function mergeFiles(
     prev: ProjectFile[],
     next: ProjectFileUpdate[],
 ): ProjectFile[] {
-    const byFilename = new Map<string, ProjectFile>();
+    const byStableKey = new Map<string, ProjectFile>();
 
     for (const file of prev) {
-        byFilename.set(file.filename, file);
+        byStableKey.set(fileMergeKey(file), file);
     }
 
     for (const file of next) {
-        const existing = byFilename.get(file.filename);
+        const key = fileMergeKey(file);
+        const existing = byStableKey.get(key);
 
         if (existing) {
-            byFilename.set(file.filename, mergeDefined(existing, file));
+            byStableKey.set(key, mergeDefined(existing, file));
         } else {
-            byFilename.set(file.filename, file as ProjectFile);
+            byStableKey.set(key, file as ProjectFile);
         }
     }
 
-    return Array.from(byFilename.values());
+    return Array.from(byStableKey.values());
 }
 
 export function sleep(ms: number) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function fileMergeKey(file: ProjectFileUpdate): string {
+    if (file.file_type) return `type:${file.file_type}`;
+    if (file.id) return `id:${file.id}`;
+    if (file.file_path) return `path:${file.file_path}`;
+    return `filename:${file.filename}`;
 }

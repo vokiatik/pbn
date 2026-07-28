@@ -1,156 +1,105 @@
 # Paint-by-Number Web Platform
 
-This repository now includes a full local web platform around the existing Python paint-by-number algorithm.
+This app converts an uploaded photo into one printable paint-by-number result through an AI-assisted workflow with an image review step.
 
-Architecture:
-
+```text
 React frontend
--> Go backend API
+-> Go backend API / WebSocket
 -> Redis queue
--> Python worker (reuses existing pipeline)
--> Generated files in shared storage
+-> Python worker
+-> FastAPI runner
+-> generated files in shared storage
+```
 
-## Services
+The only supported workflow is the AI pipeline. Legacy step-by-step segmentation, V2 printable, and V3 graph-first workflows have been removed. The current app generates saved Easy, Medium, and Hard options for explicit user selection.
 
-- frontend: React + TypeScript SPA (React Router + MUI)
-- backend: Go REST API + WebSocket + Redis pub/sub fanout
-- postgres: permanent storage
-- redis: queue, live status, pub/sub
-- worker: Python queue consumer that runs the existing pipeline in `main.py`
+## Product Flow
 
+1. Upload a PNG, JPEG, WEBP, HEIC, or HEIF image.
+2. Backend creates an `ai` project, stores `original/original.{ext}`, and registers the original file.
+3. For HEIC/HEIF uploads, backend queues browser-safe preview generation.
+4. User chooses AI settings and starts AI image generation.
+5. Worker consumes `generate_ai_image`, calls the runner, registers `ai_simplified`, and stops for review.
+6. User can regenerate the AI image or generate saved Easy, Medium, and Hard PBN options.
+7. User explicitly selects one option; only that saved option is exported, and the selection can be changed later.
+7. Worker consumes `continue_ai_pipeline`, derives regions/templates from the reviewed AI image, registers public artifacts, and publishes WebSocket events.
+8. Frontend shows status, output previews, and downloadable files.
 
-## Existing Processing Pipeline Reused
+## AI Pipeline
 
-Worker now calls the fixed-palette pipeline entry point:
-- `PBNPipeline(...).run(...)` in `pbn/pipeline.py`
+```text
+original photo
+-> prepared AI input
+-> one AI-simplified flat-colour illustration
+-> connected region extraction
+-> AI-colour palette tracing
+-> minimal paintability metadata/cleanup
+-> validation report
+-> numbered template
+-> PDF export
+```
 
-Known processing stages:
-1. Loading image
-2. Resizing image
-3. Edge-preserving smoothing
-4. Converting RGB to CIELAB
-5. SLIC superpixel segmentation
-6. Palette matching in LAB
-7. Connected component cleanup
-8. Contour extraction + number placement
-9. Rendering outputs
-10. Exporting files
+The system generates one AI image per run. That image is the visual source of truth: downstream regions protect structural boundaries, derive a bounded paint palette, and reconstruct the painted reference exactly from the final region map and assigned colours.
 
-Generated files detected and persisted:
-- `colored_preview.png`
-- `pbn_outline.png`
-- `pbn_numbered.png`
-- `pbn_vector.svg`
-- `palette.json`
-- `regions.json`
-- `final_print.pdf`
+## Configuration
 
-## Storage Layout
+The app can start without AI credentials. Running generation requires one fully configured provider. Supported providers are `openai` and `gemini`; `gpt` is accepted as an API alias for `openai`.
 
-Per project:
+```text
+AI_SIMPLIFICATION_PROVIDER=openai
+OPENAI_API_KEY=
+OPENAI_IMAGE_MODEL=
+OPENAI_IMAGE_QUALITY=low
+OPENAI_IMAGE_MODERATION=low
+GOOGLE_API_KEY=
+GOOGLE_IMAGE_MODEL=
+AI_REQUEST_TIMEOUT_SECONDS=180
+AI_MAX_RETRIES=2
+PBN_OPTION_MAX_ATTEMPTS=5
+```
 
-`/storage/projects/{public_id}/original/{filename}`
+`OPENAI_IMAGE_MODERATION` accepts `low` (the default, less restrictive filtering) or `auto` (standard filtering). Moderation blocks still return OpenAI's coarse stage and category details so the UI can suggest whether to revise the prompt/input image or regenerate.
 
-`/storage/projects/{public_id}/generated/*`
+`PBN_OPTION_MAX_ATTEMPTS` limits deterministic local density attempts per difficulty, including the initial attempt. Values are clamped to `1-5`; retries never make another AI provider call or change the requested palette. Attempt densities are ceilings: unsupported flat-image boundaries are merged even below the ceiling, while Medium/Hard use a shared 9,450-atom base to retain source-supported detail. Printed number labels choose the largest fitting 4, 3, 2, or 1 mm height.
 
-In Docker Compose this maps to volume `storage_data`.
+If the requested/default provider is not configured but exactly one other provider is configured, the runner uses the configured provider. Otherwise generation fails with a configuration error.
 
-## Status Lifecycle
+## Run Locally
 
-- uploaded
-- queued
-- processing
-- completed
-- failed
-- deleted
-
-Final status is stored in PostgreSQL. Live updates and notifications use Redis + WebSocket.
-
-## Queue and Limits
-
-- Redis queue key: `pbn:jobs`
-- max queue size: 20 (`QUEUE_MAX_SIZE`)
-- worker concurrency: 3 by default (`WORKER_CONCURRENCY`)
-- max active projects per client token: 2 (`MAX_ACTIVE_PROJECTS_PER_CLIENT`)
-
-## Run Locally (Docker Compose)
-
-Requirements:
-- Docker
-- Docker Compose
-
-Start:
+Copy `.env.example` to `.env`, add provider credentials if you want to run generation, then start the stack:
 
 ```bash
 docker compose up --build
 ```
 
 Endpoints:
-- frontend: http://localhost:5173
-- backend API: http://localhost:8080
-- websocket: ws://localhost:8080/ws
 
-Stop:
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8080
+- Runner: http://localhost:8081
+- WebSocket: ws://localhost:8080/ws
 
-```bash
-docker compose down
-```
+## Core API
 
-## API
-
-Full endpoint documentation is in:
-- `docs/API.md`
-
-Core endpoints:
 - `POST /api/projects`
+- `POST /api/projects/{public_id}/run`
+- `POST /api/projects/{public_id}/proceed`
+- `POST /api/projects/{public_id}/select-pbn`
 - `GET /api/projects`
 - `GET /api/projects/{public_id}`
 - `DELETE /api/projects/{public_id}`
 - `GET /api/projects/{public_id}/files/{file_id}/preview`
 - `GET /api/projects/{public_id}/files/{file_id}/download`
-- `POST /api/users/resolve`
-- `POST /api/users`
-- `POST /api/projects/{public_id}/attach-user`
 - `GET /ws`
 
-## Optional User Info Before Download
+See [docs/API.md](docs/API.md) and [docs/FILE-CONTRACT.md](docs/FILE-CONTRACT.md) for the detailed service contract.
 
-Frontend supports this flow:
-1. User clicks Download.
-2. If project has no user, ask for email.
-3. If email exists, attach existing user.
-4. If not, ask username + phone, create user, attach.
-5. Continue download.
-
-Skip is allowed.
-
-## Local Development Without Docker (Optional)
-
-You can still run the original CLI pipeline directly:
+## Useful Checks
 
 ```bash
-python main.py input/photo.jpg --out output --colors 32 --size 2200
+cd frontend && npm run build
+cd backend && go test ./...
+docker compose config
 ```
 
-The web platform integration uses the same Python code path through the worker.
-
-## Automatic Fixed-Palette PBN Pipeline
-
-This project now also includes a local automatic pipeline using a fixed 20-color palette and YAML configuration.
-
-Run:
-
-```bash
-python generate_pbn.py input.jpg --config config.yaml --out output_folder
-```
-
-Generated files:
-
-- `colored_preview.png`
-- `pbn_outline.png`
-- `pbn_numbered.png`
-- `pbn_vector.svg`
-- `palette.json`
-- `final_print.pdf`
-
-The command runs fully local and does not use cloud APIs.
+Python runner and worker checks are currently focused tests/import checks under `pbn/tests/` and `worker/tests/`.

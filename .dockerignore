@@ -1,5 +1,10 @@
 .git/
+.env
+.env.*
+!.env.example
 .venv/
+.cache/
+.agents/
 __pycache__/
 *.pyc
 *.pyo
@@ -11,10 +16,13 @@ __pycache__/
 # Local data and outputs not needed for image builds
 input/
 output/
+storage/
+pbn/checkpoints/
 
 # Frontend local deps/build artifacts
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # Python virtual env and cache artifacts
 **/.pytest_cache/
