@@ -105,11 +105,11 @@ class ProviderContractTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("Use exactly 18 distinct visible colors", prompt)
-        self.assertIn("replace every extra tone with the closest appropriate palette color", prompt)
-        self.assertIn("Allocate palette contrast to the main subject before the background", prompt)
-        self.assertIn("no antialiasing or blended edge pixels", prompt)
-        self.assertIn("Each region should be large enough to paint by hand", prompt)
+        self.assertIn("Edit the provided image", prompt)
+        self.assertIn("exactly 18 flat, reusable colors", prompt)
+        self.assertIn("no gradients, antialiasing", prompt)
+        self.assertIn("Do not add objects or change the pose or crop", prompt)
+        self.assertNotIn("identity", prompt.lower())
         self.assertIn("Keep both cats recognizable", prompt)
 
     def test_openai_request_uses_provider_canvas_size(self) -> None:
@@ -131,9 +131,9 @@ class ProviderContractTests(unittest.TestCase):
         self.assertIn("1536x1024", body)
         self.assertIn('name="moderation"', body)
         self.assertIn("\r\n\r\nlow\r\n", body)
-        self.assertIn("Generate exactly one image", body)
-        self.assertIn("Use exactly 17 distinct visible colors", body)
-        self.assertIn("replace every extra tone with the closest appropriate palette color", body)
+        self.assertIn("exactly 17 flat, reusable colors", body)
+        self.assertIn("Keep the original pose, composition, and crop", body)
+        self.assertNotIn("identity", body.lower())
         self.assertIn('name="image"; filename="input.png"', body)
 
     def test_gemini_request_contains_one_source_image(self) -> None:
@@ -151,8 +151,8 @@ class ProviderContractTests(unittest.TestCase):
         parts = payload["contents"][0]["parts"]
         prompt = next(part["text"] for part in parts if "text" in part)
         self.assertEqual(sum(1 for part in parts if "inline_data" in part), 1)
-        self.assertIn("Use exactly 24 distinct visible colors", prompt)
-        self.assertIn("replace every extra tone with the closest appropriate palette color", prompt)
+        self.assertIn("exactly 24 flat, reusable colors", prompt)
+        self.assertIn("Keep the original pose, composition, and crop", prompt)
         self.assertEqual(payload["generationConfig"]["responseModalities"], ["TEXT", "IMAGE"])
 
     def test_provider_alias_is_normalized_without_changing_other_settings(self) -> None:
