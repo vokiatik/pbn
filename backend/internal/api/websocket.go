@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"pbn/backend/internal/ws"
+
+	"github.com/gorilla/websocket"
 )
 
 func (s *Server) StartRedisFanout(ctx context.Context) {
@@ -67,14 +70,37 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	defer conn.Close()
+	defer s.hub.Remove(conn)
+	conn.SetReadLimit(4096)
+	_ = conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(90 * time.Second))
+	})
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				// WriteControl may run concurrently with the hub's data writer.
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+					_ = conn.Close()
+					return
+				}
+			}
+		}
+	}()
 
 	projectID := r.URL.Query().Get("project_id")
 	s.hub.Add(ws.Subscription{Conn: conn, ProjectID: projectID})
 
 	for {
 		if _, _, err := conn.ReadMessage(); err != nil {
-			s.hub.Remove(conn)
-			_ = conn.Close()
 			return
 		}
 	}

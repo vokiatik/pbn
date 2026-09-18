@@ -3,6 +3,7 @@
 Thumbs.db
 .idea/
 .cache/
+.tmp/
 
 # VS Code local workspace settings
 .vscode/
@@ -61,3 +62,6 @@ input/
 output/
 storage/
 pbn/checkpoints/
+pbn/output_objects/
+pbn/output_step*/
+pbn/input.*

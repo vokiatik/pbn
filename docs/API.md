@@ -2,6 +2,15 @@
 
 The public API supports one pipeline version: `ai`.
 
+Production uses same-origin `/api/` and `/ws` routing behind Nginx. The production
+gateway rejects request bodies above 26 MiB (including multipart overhead) with
+413, disables API/file caching, and does not expose `/api/internal/`.
+`ALLOWED_ORIGINS` is a comma-separated browser origin allowlist (local default:
+`*`; production: `https://pbn.zichka.com`) for CORS and WebSocket upgrades.
+WebSockets send server ping frames every 30 seconds and expect pongs within
+90 seconds. Browsers respond automatically. The frontend reconnects and reloads
+project state when a connection opens. See [deployment guide](PRODUCTION.md).
+
 ## Public Endpoints
 
 ### `POST /api/projects`

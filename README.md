@@ -66,6 +66,11 @@ If the requested/default provider is not configured but exactly one other provid
 
 ## Run Locally
 
+For `pbn.zichka.com` on Coolify with Cloudflare Tunnel, use the standalone
+[`docker-compose.production.yml`](docker-compose.production.yml) and follow
+[`docs/PRODUCTION.md`](docs/PRODUCTION.md). Production runtime variables are
+listed in [`deploy/.env.example`](deploy/.env.example).
+
 Copy `.env.example` to `.env`, add provider credentials if you want to run generation, then start the stack:
 
 ```bash

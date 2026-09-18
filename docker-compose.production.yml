@@ -1,0 +1,179 @@
+# Standalone production definition. Do not merge with docker-compose.yml,
+# which publishes development ports. Coolify supplies routing/network labels.
+x-service: &service
+  restart: unless-stopped
+  logging:
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-app: &app
+  <<: *service
+  user: "10001:10001"
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:rw,nosuid,nodev,size=512m,mode=1777
+
+services:
+  postgres:
+    <<: *service
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: pbn
+      POSTGRES_USER: pbn
+      # Generate a hex password; it is also interpolated into a URI below.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random hexadecimal database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U pbn -d pbn"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 60s
+
+  redis:
+    <<: *service
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random hexadecimal Redis password}
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
+    command:
+      - /bin/sh
+      - -ec
+      - 'exec redis-server --appendonly yes --appendfsync everysec --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    stop_grace_period: 60s
+
+  backend:
+    <<: *app
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      HTTP_PORT: "8080"
+      POSTGRES_DSN: postgres://pbn:${POSTGRES_PASSWORD}@postgres:5432/pbn?sslmode=disable
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: "0"
+      REDIS_QUEUE_NAME: pbn:jobs
+      REDIS_EVENTS_CHANNEL: pbn:events
+      QUEUE_MAX_SIZE: ${QUEUE_MAX_SIZE:-20}
+      MAX_ACTIVE_PROJECTS_PER_CLIENT: ${MAX_ACTIVE_PROJECTS_PER_CLIENT:-2}
+      STORAGE_ROOT: /storage
+      PUBLIC_ID_LENGTH: "12"
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?Set a random internal API secret}
+      ALLOWED_ORIGINS: ${APP_ORIGIN:-https://pbn.zichka.com}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - storage_data:/storage
+    healthcheck:
+      test: [CMD, /bin/healthcheck]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    stop_grace_period: 30s
+
+  pbn:
+    <<: *app
+    build:
+      context: .
+      dockerfile: pbn/Dockerfile
+    environment:
+      PROJECTS_DIR: /storage/projects
+      AI_SIMPLIFICATION_PROVIDER: ${AI_SIMPLIFICATION_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-}
+      OPENAI_IMAGE_QUALITY: ${OPENAI_IMAGE_QUALITY:-low}
+      OPENAI_IMAGE_MODERATION: ${OPENAI_IMAGE_MODERATION:-low}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+      GOOGLE_IMAGE_MODEL: ${GOOGLE_IMAGE_MODEL:-}
+      AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-180}
+      AI_MAX_RETRIES: ${AI_MAX_RETRIES:-2}
+      PBN_OPTION_MAX_ATTEMPTS: ${PBN_OPTION_MAX_ATTEMPTS:-5}
+      # Avoid each numerical library multiplying the worker's CPU parallelism.
+      OMP_NUM_THREADS: ${PBN_NUM_THREADS:-1}
+      OPENBLAS_NUM_THREADS: ${PBN_NUM_THREADS:-1}
+      MKL_NUM_THREADS: ${PBN_NUM_THREADS:-1}
+    volumes:
+      - storage_data:/storage
+    shm_size: 512m
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    stop_grace_period: 65m
+
+  worker:
+    <<: *app
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    environment:
+      REDIS_ADDR: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: "0"
+      REDIS_QUEUE_NAME: pbn:jobs
+      REDIS_EVENTS_CHANNEL: pbn:events
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
+      BACKEND_INTERNAL_BASE: http://backend:8080/api/internal
+      PYTHON_RUNNER_BASE_URL: http://pbn:8081
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pbn:
+        condition: service_healthy
+    volumes:
+      - storage_data:/storage:ro
+    healthcheck:
+      test: [CMD, python, -m, worker.worker_app.healthcheck]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 65m
+
+  frontend:
+    <<: *app
+    user: "101:101"
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, "http://127.0.0.1:8080/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
+  redis_data:
+  storage_data:

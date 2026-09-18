@@ -41,7 +41,18 @@ func NewServer(
 		redis:  redisClient,
 		logger: logger,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // Non-browser clients do not send Origin.
+				}
+				for _, allowed := range cfg.AllowedOrigins {
+					if allowed == "*" || origin == allowed {
+						return true
+					}
+				}
+				return false
+			},
 		},
 	}
 }

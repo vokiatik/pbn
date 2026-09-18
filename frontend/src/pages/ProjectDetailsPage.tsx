@@ -44,6 +44,7 @@ import { ProjectFilesTable } from "../components/Details/ProjectFilesTable";
 import { SuggestedElementsField } from "../components/Details/SuggestedElementsField";
 import StatusChip from "../components/StatusChip";
 import { getAICategoryOption, normalizeAICategory } from "../config/aiCategories";
+import { subscribeToProjectEvents } from "../api/projectEvents";
 
 const defaultSettings: AISettings = {
     provider: "openai",
@@ -123,9 +124,25 @@ export function ProjectDetailsPage() {
     }, [publicId]);
 
     useEffect(() => {
-        const wsBase = (import.meta.env.VITE_WS_BASE ?? "ws://localhost:8080") as string;
-        const ws = new WebSocket(`${wsBase}/ws?project_id=${publicId}`);
-        ws.onmessage = (event) => {
+        let cancelled = false;
+        const refresh = async () => {
+            try {
+                const data = await getProject(publicId);
+                if (cancelled) return;
+                setProject(data.project);
+                setFiles(data.files);
+                setRunning(activeProcessingStatuses.has(data.project.status));
+                if (!activeProcessingStatuses.has(data.project.status)) {
+                    setProgressStage(null);
+                    setProgressMessage(null);
+                    setProgressValue(0);
+                }
+            } catch {
+                // A reconnect can race a backend restart; the next connection
+                // or project event reconciles state again.
+            }
+        };
+        const unsubscribe = subscribeToProjectEvents(publicId, (event) => {
             try {
                 const payload = JSON.parse(event.data) as {
                     type?: string;
@@ -171,7 +188,7 @@ export function ProjectDetailsPage() {
                     setProject((current) => current ? { ...current, error_message: payload.message } : current);
                 }
                 if (payload.files?.length) {
-                    void load();
+                    void refresh();
                 }
                 if (payload.ai_quality) {
                     setProject((current) => current ? { ...current, ai_quality: payload.ai_quality } : current);
@@ -179,8 +196,11 @@ export function ProjectDetailsPage() {
             } catch {
                 // ignore malformed event
             }
+        }, () => { void refresh(); });
+        return () => {
+            cancelled = true;
+            unsubscribe();
         };
-        return () => ws.close();
     }, [publicId]);
 
     const sourcePreviewFile = useMemo(() => {

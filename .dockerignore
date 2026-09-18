@@ -2,6 +2,12 @@
 .env
 .env.*
 !.env.example
+**/.env
+**/.env.*
+!**/.env.example
+.codex/
+**/__pycache__/
+**/node_modules/
 .venv/
 .cache/
 .agents/

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -18,6 +19,7 @@ type Config struct {
 	MaxActivePerUser   int
 	PublicIDLength     int
 	InternalAPISecret  string
+	AllowedOrigins     []string
 }
 
 func Load() Config {
@@ -34,6 +36,7 @@ func Load() Config {
 		MaxActivePerUser:   envInt("MAX_ACTIVE_PROJECTS_PER_CLIENT", 2),
 		PublicIDLength:     envInt("PUBLIC_ID_LENGTH", 12),
 		InternalAPISecret:  env("INTERNAL_API_SECRET", "local-dev-secret"),
+		AllowedOrigins:     strings.FieldsFunc(env("ALLOWED_ORIGINS", "*"), func(r rune) bool { return r == ',' || r == ' ' }),
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 func (s *Server) Routes() http.Handler {
 	r := chi.NewRouter()
 	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   []string{"*"},
+		AllowedOrigins:   s.cfg.AllowedOrigins,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Client-Token", "X-Internal-Secret"},
 		ExposedHeaders:   []string{"Content-Length", "Content-Type"},

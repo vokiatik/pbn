@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import signal
 import threading
-import time
+from pathlib import Path
 
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -16,6 +17,7 @@ from .jobs import JobProcessor
 from .runner_client import PythonRunnerClient
 
 logger = logging.getLogger(__name__)
+HEARTBEAT_PATH = Path("/tmp/pbn-worker-heartbeat")
 
 def create_redis_client(config: WorkerConfig) -> Redis:
     return Redis(
@@ -27,7 +29,7 @@ def create_redis_client(config: WorkerConfig) -> Redis:
     )
 
 
-def worker_loop(worker_name: str, config: WorkerConfig) -> None:
+def worker_loop(worker_name: str, config: WorkerConfig, stopping: threading.Event) -> None:
     redis_client = create_redis_client(config)
     backend = BackendInternalClient(config)
     runner = PythonRunnerClient(config)
@@ -36,11 +38,11 @@ def worker_loop(worker_name: str, config: WorkerConfig) -> None:
 
     logger.info("worker started: %s", worker_name)
 
-    while True:
+    while not stopping.is_set():
         try:
             if not runner.is_ready():
                 logger.info("runner is not ready; waiting before consuming jobs")
-                time.sleep(2)
+                stopping.wait(2)
                 continue
             item = redis_client.blpop(config.queue_name, timeout=5)
             if not item:
@@ -54,23 +56,38 @@ def worker_loop(worker_name: str, config: WorkerConfig) -> None:
             continue
         except RedisConnectionError:
             logger.warning("redis connection issue in worker loop; retrying")
-            time.sleep(2)
+            stopping.wait(2)
         except Exception:
             logger.exception("worker loop error")
-            time.sleep(2)
+            stopping.wait(2)
+
+    redis_client.close()
 
 
 def start_workers(config: WorkerConfig) -> None:
+    if config.concurrency < 1:
+        raise ValueError("WORKER_CONCURRENCY must be at least 1")
+    stopping = threading.Event()
+
+    def stop(signum: int, _frame: object) -> None:
+        logger.info("received signal %s; finishing active jobs before exit", signum)
+        stopping.set()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     threads: list[threading.Thread] = []
 
     for i in range(config.concurrency):
         thread = threading.Thread(
             target=worker_loop,
-            args=(f"worker-{i + 1}", config),
-            daemon=True,
+            args=(f"worker-{i + 1}", config, stopping),
+            daemon=False,
         )
         thread.start()
         threads.append(thread)
 
-    for thread in threads:
-        thread.join()
+    while any(thread.is_alive() for thread in threads):
+        if all(thread.is_alive() for thread in threads):
+            HEARTBEAT_PATH.touch()
+        for thread in threads:
+            thread.join(timeout=1)

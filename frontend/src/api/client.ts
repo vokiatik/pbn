@@ -1,6 +1,14 @@
 import type { AICategory } from "../config/aiCategories";
 
-export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8080";
+export const API_BASE = import.meta.env.VITE_API_BASE ?? (import.meta.env.PROD ? window.location.origin : "http://localhost:8080");
+
+export function buildWebSocketUrl(publicId: string): string {
+    const url = new URL(import.meta.env.VITE_WS_BASE || API_BASE || window.location.origin);
+    url.protocol = url.protocol === "https:" || url.protocol === "wss:" ? "wss:" : "ws:";
+    url.pathname = `${url.pathname.replace(/\/$/, "")}/ws`;
+    url.search = new URLSearchParams({ project_id: publicId }).toString();
+    return url.toString();
+}
 
 export type PipelineVersion = "ai";
 

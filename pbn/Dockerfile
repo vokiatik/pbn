@@ -17,7 +17,8 @@ COPY pbn/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY pbn /app
+RUN mkdir -p /storage/projects && chown -R 10001:10001 /storage
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 HOME=/tmp
 
 CMD ["uvicorn", "runner:app", "--host", "0.0.0.0", "--port", "8081"]
