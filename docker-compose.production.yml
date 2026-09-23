@@ -23,9 +23,9 @@ services:
   postgres:
     <<: *service
     image: postgres:16-alpine
+    env_file:
+      - ./deploy/env/postgres.env
     environment:
-      POSTGRES_DB: pbn
-      POSTGRES_USER: pbn
       # Generate a hex password; it is also interpolated into a URI below.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random hexadecimal database password}
     volumes:
@@ -42,7 +42,7 @@ services:
     image: redis:7-alpine
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random hexadecimal Redis password}
-      REDISCLI_AUTH: ${REDIS_PASSWORD}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Set a random hexadecimal Redis password}
     command:
       - /bin/sh
       - -ec
@@ -61,20 +61,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    env_file:
+      - ./deploy/env/backend.env
     environment:
-      HTTP_PORT: "8080"
       POSTGRES_DSN: postgres://pbn:${POSTGRES_PASSWORD}@postgres:5432/pbn?sslmode=disable
-      REDIS_ADDR: redis:6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      REDIS_DB: "0"
-      REDIS_QUEUE_NAME: pbn:jobs
-      REDIS_EVENTS_CHANNEL: pbn:events
-      QUEUE_MAX_SIZE: ${QUEUE_MAX_SIZE:-20}
-      MAX_ACTIVE_PROJECTS_PER_CLIENT: ${MAX_ACTIVE_PROJECTS_PER_CLIENT:-2}
-      STORAGE_ROOT: /storage
-      PUBLIC_ID_LENGTH: "12"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random hexadecimal Redis password}
       INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?Set a random internal API secret}
-      ALLOWED_ORIGINS: ${APP_ORIGIN:-https://pbn.zichka.com}
+      ALLOWED_ORIGINS: ${APP_ORIGIN:?Set the public application origin}
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,22 +88,8 @@ services:
     build:
       context: .
       dockerfile: pbn/Dockerfile
-    environment:
-      PROJECTS_DIR: /storage/projects
-      AI_SIMPLIFICATION_PROVIDER: ${AI_SIMPLIFICATION_PROVIDER:-openai}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_IMAGE_MODEL: ${OPENAI_IMAGE_MODEL:-}
-      OPENAI_IMAGE_QUALITY: ${OPENAI_IMAGE_QUALITY:-low}
-      OPENAI_IMAGE_MODERATION: ${OPENAI_IMAGE_MODERATION:-low}
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
-      GOOGLE_IMAGE_MODEL: ${GOOGLE_IMAGE_MODEL:-}
-      AI_REQUEST_TIMEOUT_SECONDS: ${AI_REQUEST_TIMEOUT_SECONDS:-180}
-      AI_MAX_RETRIES: ${AI_MAX_RETRIES:-2}
-      PBN_OPTION_MAX_ATTEMPTS: ${PBN_OPTION_MAX_ATTEMPTS:-5}
-      # Avoid each numerical library multiplying the worker's CPU parallelism.
-      OMP_NUM_THREADS: ${PBN_NUM_THREADS:-1}
-      OPENBLAS_NUM_THREADS: ${PBN_NUM_THREADS:-1}
-      MKL_NUM_THREADS: ${PBN_NUM_THREADS:-1}
+    env_file:
+      - ./deploy/env/pbn.env
     volumes:
       - storage_data:/storage
     shm_size: 512m
@@ -127,17 +106,11 @@ services:
     build:
       context: .
       dockerfile: worker/Dockerfile
+    env_file:
+      - ./deploy/env/worker.env
     environment:
-      REDIS_ADDR: redis
-      REDIS_PORT: "6379"
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      REDIS_DB: "0"
-      REDIS_QUEUE_NAME: pbn:jobs
-      REDIS_EVENTS_CHANNEL: pbn:events
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-1}
-      BACKEND_INTERNAL_BASE: http://backend:8080/api/internal
-      PYTHON_RUNNER_BASE_URL: http://pbn:8081
-      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a random hexadecimal Redis password}
+      INTERNAL_API_SECRET: ${INTERNAL_API_SECRET:?Set a random internal API secret}
     depends_on:
       backend:
         condition: service_healthy

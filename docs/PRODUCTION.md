@@ -22,12 +22,18 @@ Network** disabled. Coolify's proxy joins the app network automatically.
 See [Coolify Compose](https://coolify.io/docs/applications/build-packs/docker-compose)
 and [networking](https://coolify.io/docs/core/networking-in-coolify).
 
-Copy the variables from `deploy/.env.example` into Coolify's **runtime**
-environment variables. Generate three different secrets, each with
+Copy the deployment-specific variables from `deploy/.env.example` into
+Coolify's **runtime** environment variables. Fixed service wiring and safe
+defaults live in the committed `deploy/env/*.env` files; change those files
+when an operational default needs to be tuned. Generate three different
+secrets, each with
 `openssl rand -hex 32`, for `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, and
 `INTERNAL_API_SECRET`. Use hexadecimal database passwords because the value is
-embedded in the PostgreSQL connection URI. Configure both the key and image
-model for at least one AI provider. Leave `APP_ORIGIN=https://pbn.zichka.com`.
+embedded in the PostgreSQL connection URI. Set `APP_ORIGIN` to the public HTTPS
+origin. The committed runner configuration selects OpenAI, so configure both
+`OPENAI_API_KEY` and `OPENAI_IMAGE_MODEL`. To use Gemini instead, change
+`AI_SIMPLIFICATION_PROVIDER` in `deploy/env/pbn.env` and supply both Gemini
+credential variables to the runner service. Do not commit provider credentials.
 Do not mark credentials as build variables; disable automatic build-argument
 injection. The images need no secret build arguments or hostname rebuilds.
 
@@ -144,10 +150,12 @@ and [connection limits](https://developers.cloudflare.com/fundamentals/reference
 
 ## Operations and data
 
-Start with `WORKER_CONCURRENCY=1` and `PBN_NUM_THREADS=1`. CPU/RAM determine
+The committed service files start with `WORKER_CONCURRENCY=1` and one thread
+for each numerical library. CPU/RAM determine
 throughput and whether image processing fits in memory, not whether Compose
 can parse the file. Measure peak memory on large real inputs before raising
-concurrency or setting container memory limits; allow capacity for image builds,
+these values in `deploy/env/worker.env` and `deploy/env/pbn.env`, or setting
+container memory limits; allow capacity for image builds,
 PostgreSQL, Redis, and Coolify. This is a single-server deployment, not HA.
 
 Schedule encrypted off-server backups of both the **PostgreSQL database** and
