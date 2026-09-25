@@ -201,7 +201,7 @@ class JobProcessor:
             local_files = public_pbn_option_files(project_root)
             saved_files = self.backend.post_files(project_id, local_files) if local_files else []
 
-            self.backend.post_status(project_id, "pbn_options_ready", 100, "PBN difficulty options are ready")
+            self.backend.post_status(project_id, "pbn_options_ready", 100, "Hard PBN preview is ready")
             self.events.publish(
                 {
                     "type": "pbn_options_ready",
@@ -293,7 +293,7 @@ class JobProcessor:
             local_files = public_pbn_option_files(project_root)
             saved_files = self.backend.post_files(project_id, local_files) if local_files else []
 
-            self.backend.post_status(project_id, "pbn_options_ready", 100, "PBN difficulty options are ready")
+            self.backend.post_status(project_id, "pbn_options_ready", 100, "Hard PBN preview is ready")
             self.events.publish(
                 {
                     "type": "pbn_options_ready",

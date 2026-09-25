@@ -8,9 +8,9 @@ from itertools import product
 DIFFICULTY_ORDER = ("easy", "medium", "hard")
 REGION_BUDGETS = {"easy": 500, "medium": 750, "hard": 1050}
 DENSITY_TARGETS = {
-    "easy": (375, 350, 400, 325, 425),
-    "medium": (750, 700, 650, 600, 550),
-    "hard": (1050, 975, 900, 825, 750),
+    "easy": (300, 275, 325, 250, 350),
+    "medium": (450, 425, 400, 375, 350),
+    "hard": (650, 600, 550, 500, 450),
 }
 DEFAULT_MAX_ATTEMPTS = 5
 MAX_ATTEMPTS_LIMIT = 5
@@ -127,7 +127,7 @@ def _selection_rank(selected: list[OptionCandidate]) -> tuple[int, ...]:
     hard = _bounded_density_score(values.get("hard"), REGION_BUDGETS["hard"])
     medium = _bounded_density_score(values.get("medium"), REGION_BUDGETS["medium"])
     easy = values.get("easy")
-    easy_closeness = -abs(easy - 375) if easy is not None else -10_000
+    easy_closeness = -abs(easy - DENSITY_TARGETS["easy"][0]) if easy is not None else -10_000
     easy_lower_tie = -easy if easy is not None else -10_000
     presence = tuple(1 if difficulty in values else 0 for difficulty in reversed(DIFFICULTY_ORDER))
     attempts = -sum(item.attempt for item in selected)

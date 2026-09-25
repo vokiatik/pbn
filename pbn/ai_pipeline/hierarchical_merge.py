@@ -31,6 +31,8 @@ def compact_hierarchically(
     target_region_count: int,
     maximum_region_count: int,
     user_protected_pairs: set[tuple[int, int]] | None = None,
+    minimum_area_pixels: float = 0.0,
+    minimum_width_pixels: float = 0.0,
 ) -> HierarchicalMergeResult:
     """Dynamically merge regions using immutable source-pixel palette costs."""
     maximum = int(region_map.max())
@@ -55,6 +57,13 @@ def compact_hierarchically(
 
     adjacency = build_adjacency(region_map)
     shared = _shared_boundary_lengths(region_map)
+    perimeter = np.zeros(maximum + 1, dtype=np.float64)
+    for first, second in ((region_map[:, :-1], region_map[:, 1:]), (region_map[:-1, :], region_map[1:, :])):
+        changed = first != second
+        perimeter += np.bincount(first[changed], minlength=maximum + 1)
+        perimeter += np.bincount(second[changed], minlength=maximum + 1)
+    for border in (region_map[0], region_map[-1], region_map[:, 0], region_map[:, -1]):
+        perimeter += np.bincount(border, minlength=maximum + 1)
     evidence = dict(boundary_evidence)
     user_edge = {pair: pair in set(user_protected_pairs or set()) for pair in shared}
     parent = np.arange(maximum + 1, dtype=np.int32)
@@ -73,7 +82,13 @@ def compact_hierarchically(
     def mean_lab(region_id: int) -> np.ndarray:
         return lab_sums[region_id] / max(1.0, area[region_id])
 
-    def edge_values(left: int, right: int) -> tuple[float, float, float, float, float]:
+    def below_print_floor(region_id: int) -> bool:
+        return (
+            area[region_id] < minimum_area_pixels
+            or 2.0 * area[region_id] / max(1.0, perimeter[region_id]) < minimum_width_pixels
+        )
+
+    def edge_values(left: int, right: int) -> tuple[int, float, float, float, float, float, float]:
         pair = _pair(left, right)
         total_area = area[left] + area[right]
         reconstruction = (
@@ -85,7 +100,14 @@ def compact_hierarchically(
         delta = float(color.deltaE_ciede2000(mean_lab(left)[None, :], mean_lab(right)[None, :])[0])
         contact = shared.get(pair, 1) / max(1.0, np.sqrt(min(area[left], area[right])))
         shape = abs(area[left] - area[right]) / max(1.0, total_area)
-        return max(0.0, reconstruction), boundary, delta, shape, contact
+        reconstruction = max(0.0, reconstruction)
+        # Both terms are in approximate Delta-E units. A tiny eye therefore
+        # competes on contrast and source-edge support, not on its pixel area.
+        # The selected mask increases evidence without making an impenetrable
+        # processing box; a physical or palette constraint can still win.
+        edge_loss = boundary * delta * (2.0 if user_edge.get(pair, False) else 1.0)
+        print_priority = 0 if below_print_floor(left) or below_print_floor(right) else 1
+        return print_priority, reconstruction + edge_loss, reconstruction, boundary, delta, shape, contact
 
     def valid(left: int, right: int, left_version: int, right_version: int) -> bool:
         return (
@@ -100,12 +122,14 @@ def compact_hierarchically(
         nonlocal active_count
         pair = _pair(left, right)
         selected = bool(user_edge.get(pair, False))
+        shared_contact = shared.get(pair, 0)
         target, source = (left, right) if left < right else (right, left)
         parent[source] = target
         active[source] = False
         area[target] += area[source]
         lab_sums[target] += lab_sums[source]
         palette_costs[target] += palette_costs[source]
+        perimeter[target] += perimeter[source] - 2.0 * shared_contact
         region_protection[target] = max(region_protection[target], region_protection[source])
         versions[target] += 1
         neighbours = (set(adjacency.get(target, set())) | set(adjacency.get(source, set()))) - {target, source}
@@ -117,8 +141,15 @@ def compact_hierarchically(
             adjacency[neighbour].add(target)
             target_pair = _pair(target, neighbour)
             source_pair = _pair(source, neighbour)
-            shared[target_pair] = shared.get(target_pair, 0) + shared.get(source_pair, 0)
-            evidence[target_pair] = max(evidence.get(target_pair, 0.0), evidence.get(source_pair, 0.0))
+            target_length = shared.get(target_pair, 0)
+            source_length = shared.get(source_pair, 0)
+            total_length = target_length + source_length
+            shared[target_pair] = total_length
+            if total_length:
+                evidence[target_pair] = (
+                    evidence.get(target_pair, 0.0) * target_length
+                    + evidence.get(source_pair, 0.0) * source_length
+                ) / total_length
             user_edge[target_pair] = user_edge.get(target_pair, False) or user_edge.get(source_pair, False)
         active_count -= 1
         return target, neighbours, selected
@@ -129,7 +160,7 @@ def compact_hierarchically(
         if left == right or not active[left] or not active[right]:
             return
         left, right = _pair(left, right)
-        reconstruction, boundary, delta, _, contact = edge_values(left, right)
+        _, _, reconstruction, boundary, delta, _, contact = edge_values(left, right)
         if delta < WEAK_SOURCE_DELTA_E and boundary < WEAK_BOUNDARY_EVIDENCE:
             heapq.heappush(
                 weak_heap,
@@ -149,16 +180,17 @@ def compact_hierarchically(
         for neighbour in neighbours:
             push_weak(target, neighbour)
 
-    density_heap: list[tuple[float, float, float, float, float, int, int, int, int]] = []
+    density_heap: list[tuple[int, float, float, float, float, float, float, int, int, int, int]] = []
+    physical_merges = 0
 
     def push_density(left: int, right: int) -> None:
         if left == right or not active[left] or not active[right]:
             return
         left, right = _pair(left, right)
-        reconstruction, boundary, delta, shape, contact = edge_values(left, right)
+        print_priority, cost, reconstruction, boundary, delta, shape, contact = edge_values(left, right)
         heapq.heappush(
             density_heap,
-            (reconstruction, boundary, delta, shape, -contact, left, right, int(versions[left]), int(versions[right])),
+            (print_priority, cost, boundary, reconstruction, delta, shape, -contact, left, right, int(versions[left]), int(versions[right])),
         )
 
     for left, neighbours in adjacency.items():
@@ -167,43 +199,47 @@ def compact_hierarchically(
         for right in neighbours:
             if left < right:
                 push_density(left, right)
-    while density_heap and active_count > target_region_count:
-        _, boundary, _, _, _, left, right, left_version, right_version = heapq.heappop(density_heap)
+    while density_heap:
+        print_priority, _, _, _, _, _, _, left, right, left_version, right_version = heapq.heappop(density_heap)
         if not valid(left, right, left_version, right_version):
             continue
-        if boundary >= HARD_BOUNDARY_EVIDENCE:
+        if active_count <= target_region_count and print_priority != 0:
+            break
+        if user_edge.get(_pair(left, right), False) and active_count <= maximum_region_count and print_priority != 0:
             continue
-        target, neighbours, _ = merge(left, right)
+        target, neighbours, selected = merge(left, right)
         density_merges += 1
+        physical_merges += int(print_priority == 0)
+        forced_user_merges += int(selected)
         for neighbour in neighbours:
             push_density(target, neighbour)
 
     if active_count > maximum_region_count:
-        forced_heap: list[tuple[float, float, float, float, float, int, int, int, int]] = []
+        forced_heap: list[tuple[int, float, float, float, float, float, float, int, int, int, int]] = []
         for left, neighbours in adjacency.items():
             if not active[left]:
                 continue
             for right in neighbours:
                 if left >= right:
                     continue
-                reconstruction, boundary, delta, shape, contact = edge_values(left, right)
+                print_priority, cost, reconstruction, boundary, delta, shape, contact = edge_values(left, right)
                 heapq.heappush(
                     forced_heap,
-                    (reconstruction, boundary, delta, shape, -contact, left, right, int(versions[left]), int(versions[right])),
+                    (print_priority, cost, boundary, reconstruction, delta, shape, -contact, left, right, int(versions[left]), int(versions[right])),
                 )
         while forced_heap and active_count > maximum_region_count:
-            _, _, _, _, _, left, right, left_version, right_version = heapq.heappop(forced_heap)
+            _, _, _, _, _, _, _, left, right, left_version, right_version = heapq.heappop(forced_heap)
             if not valid(left, right, left_version, right_version):
                 continue
             target, neighbours, selected = merge(left, right)
             density_merges += 1
             forced_user_merges += int(selected)
             for neighbour in neighbours:
-                reconstruction, boundary, delta, shape, contact = edge_values(target, neighbour)
+                print_priority, cost, reconstruction, boundary, delta, shape, contact = edge_values(target, neighbour)
                 a, b = _pair(target, neighbour)
                 heapq.heappush(
                     forced_heap,
-                    (reconstruction, boundary, delta, shape, -contact, a, b, int(versions[a]), int(versions[b])),
+                    (print_priority, cost, boundary, reconstruction, delta, shape, -contact, a, b, int(versions[a]), int(versions[b])),
                 )
     if active_count > maximum_region_count:
         raise ValueError("protected microregion graph could not be compacted within the 10% overflow limit")
@@ -241,6 +277,7 @@ def compact_hierarchically(
             "maximum_protected_region_count": int(maximum_region_count),
             "weak_boundary_merge_count": weak_merges,
             "density_merge_count": density_merges,
+            "physical_constraint_merge_count": physical_merges,
             "selected_forced_merge_count": forced_user_merges,
             "post_compaction_region_count": active_count,
             "protection_overflow_percent": round(overflow, 6),

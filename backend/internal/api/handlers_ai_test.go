@@ -76,12 +76,26 @@ func TestStoredAISettingsRequiresLegacyProjectRegeneration(t *testing.T) {
 }
 
 func TestSavedOptionMustBeExplicitlyValid(t *testing.T) {
-	options := json.RawMessage(`[{"difficulty":"easy","status":"valid"},{"difficulty":"hard","status":"failed"}]`)
-	if !savedOptionExists(options, "easy") {
-		t.Fatal("expected valid easy option")
+	options := json.RawMessage(`[{"difficulty":"easy","status":"valid"},{"difficulty":"hard","status":"valid"}]`)
+	if !savedOptionExists(options, "hard") {
+		t.Fatal("expected valid hard option")
 	}
-	if savedOptionExists(options, "hard") || savedOptionExists(options, "medium") {
-		t.Fatal("invalid or missing options must not be selectable")
+	if savedOptionExists(options, "easy") || savedOptionExists(options, "medium") || savedOptionExists(json.RawMessage(`[{"difficulty":"hard","status":"failed"}]`), "hard") {
+		t.Fatal("legacy difficulties and invalid options must not be selectable")
+	}
+}
+
+func TestPBNOptionsEndpointRejectsLegacyDifficulties(t *testing.T) {
+	server := NewServer(config.Config{InternalAPISecret: "test-secret"}, nil, nil, nil, nil, nil)
+	for _, difficulty := range []string{"easy", "medium"} {
+		body := `{"options":[{"difficulty":"` + difficulty + `","status":"valid"}]}`
+		req := httptest.NewRequest(http.MethodPost, "/api/internal/projects/"+uuid.NewString()+"/pbn-options", strings.NewReader(body))
+		req.Header.Set("X-Internal-Secret", "test-secret")
+		response := httptest.NewRecorder()
+		server.Routes().ServeHTTP(response, req)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("expected %s rejection, got %d", difficulty, response.Code)
+		}
 	}
 }
 

@@ -372,7 +372,7 @@ export function DetailProtectionEditor({ publicId, src, disabled, onDirtyChange,
             <Button variant="outlined" disabled={disabled || saving || loading || !dirty} onClick={() => void save()}>
                 {saving ? <CircularProgress size={20} /> : "Save detail protection"}
             </Button>
-            {dirty && <Alert severity="info">Save the protection mask before generating PBN options.</Alert>}
+            {dirty && <Alert severity="info">Save the protection mask before generating Hard PBN.</Alert>}
             <Box sx={{ display: "none" }}>{historyVersion}</Box>
         </Stack>
     );

@@ -49,7 +49,7 @@ export interface Project {
     files_count: number;
 }
 
-export type PBNDifficulty = "easy" | "medium" | "hard";
+export type PBNDifficulty = "hard";
 
 export interface PBNOption {
     difficulty: PBNDifficulty;

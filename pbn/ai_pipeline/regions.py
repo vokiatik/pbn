@@ -105,7 +105,7 @@ def build_region_records(
                 representative_color=representative,
                 neighbours=sorted(adjacency.get(region_id, set())),
                 holes=_hole_count(mask),
-                components=1,
+                components=int(ndimage.label(mask, structure=FOUR_CONNECTED)[1]),
             )
         )
     return records

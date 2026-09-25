@@ -327,9 +327,9 @@ class GeometryAndPaletteTests(unittest.TestCase):
         self.assertTrue(has_optimal_triplet(candidates))
 
     def test_attempt_schedules_and_limit_are_bounded(self) -> None:
-        self.assertEqual([density_target("easy", index) for index in range(5)], [375, 350, 400, 325, 425])
-        self.assertEqual([density_target("medium", index) for index in range(5)], [750, 700, 650, 600, 550])
-        self.assertEqual([density_target("hard", index) for index in range(5)], [1050, 975, 900, 825, 750])
+        self.assertEqual([density_target("easy", index) for index in range(5)], [300, 275, 325, 250, 350])
+        self.assertEqual([density_target("medium", index) for index in range(5)], [450, 425, 400, 375, 350])
+        self.assertEqual([density_target("hard", index) for index in range(5)], [650, 600, 550, 500, 450])
         with patch.dict("os.environ", {"PBN_OPTION_MAX_ATTEMPTS": "99"}):
             self.assertEqual(option_max_attempts(), 5)
         with patch.dict("os.environ", {"PBN_OPTION_MAX_ATTEMPTS": "2"}):
@@ -569,12 +569,12 @@ class GeometryAndPaletteTests(unittest.TestCase):
         np.testing.assert_array_equal(projected == 2, labels == 2)
 
     def test_source_edge_alignment_returns_valid_baseline_when_all_proposals_fail(self) -> None:
-        labels = np.ones((40, 80), dtype=np.int32)
-        labels[:, 40:] = 2
+        labels = np.ones((400, 800), dtype=np.int32)
+        labels[:, 400:] = 2
         candidate = np.ones_like(labels)
-        candidate[:, 39:] = 2
-        rgb = np.full((40, 80, 3), [220, 70, 55], dtype=np.uint8)
-        rgb[:, 40:] = [55, 90, 220]
+        candidate[:, 399:] = 2
+        rgb = np.full((400, 800, 3), [220, 70, 55], dtype=np.uint8)
+        rgb[:, 400:] = [55, 90, 220]
         violation = {
             "region_id": 2,
             "area_pixels": 10,
@@ -612,10 +612,10 @@ class GeometryAndPaletteTests(unittest.TestCase):
         self.assertGreater(log["rejected_radius_count"], 0)
 
     def test_source_edge_alignment_failure_reports_affected_regions(self) -> None:
-        labels = np.ones((40, 80), dtype=np.int32)
-        labels[:, 40:] = 2
-        rgb = np.full((40, 80, 3), [220, 70, 55], dtype=np.uint8)
-        rgb[:, 40:] = [55, 90, 220]
+        labels = np.ones((400, 800), dtype=np.int32)
+        labels[:, 400:] = 2
+        rgb = np.full((400, 800, 3), [220, 70, 55], dtype=np.uint8)
+        rgb[:, 400:] = [55, 90, 220]
         violation = {
             "region_id": 2,
             "area_pixels": 10,

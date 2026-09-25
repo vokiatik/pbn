@@ -218,7 +218,9 @@ export function ProjectDetailsPage() {
 
     const canGenerateAI = project?.status === "uploaded" || project?.status === "ai_failed";
     const canRegenerateAI = project?.status === "ai_image_ready" || project?.status === "pbn_failed" || project?.status === "pbn_options_ready" || project?.status === "pbn_selection_failed" || project?.status === "ai_completed";
-    const canProceed = project?.status === "ai_image_ready";
+    const hasHardOption = project?.pbn_options?.some((option) => option.difficulty === "hard" && option.status === "valid");
+    const canProceed = project?.status === "ai_image_ready" || project?.status === "pbn_failed" ||
+        (!hasHardOption && ["pbn_options_ready", "pbn_selection_failed", "ai_completed"].includes(project?.status ?? ""));
     const isProcessingActive = Boolean(project && activeProcessingStatuses.has(project.status));
     const isAiExchangeActive = project?.status === "ai_queued" || project?.status === "ai_processing" || project?.status === "ai_image_queued" || project?.status === "ai_image_processing";
     const canReplaceImage = Boolean(project && ![...activeProcessingStatuses, "upload_preview_queued", "upload_preview_processing"].includes(project.status));
@@ -250,7 +252,7 @@ export function ProjectDetailsPage() {
         setError(null);
         setRunning(true);
         setProgressStage("queued");
-        setProgressMessage("Queued to generate Easy, Medium, and Hard options");
+        setProgressMessage("Queued to generate Hard PBN");
         setProgressValue(0);
         try {
             await proceedAIPipeline(publicId);
@@ -522,7 +524,7 @@ export function ProjectDetailsPage() {
                             )}
                             {canProceed && (
                                 <Button variant="contained" onClick={() => void handleProceed()} disabled={running || settingsDirty || protectionDirty} fullWidth>
-                                    {running ? <CircularProgress size={20} /> : "Generate PBN options"}
+                                    {running ? <CircularProgress size={20} /> : "Generate Hard PBN"}
                                 </Button>
                             )}
                         </Stack>
@@ -542,7 +544,7 @@ export function ProjectDetailsPage() {
                             />
                         </Box>
                     )}
-                    {project.pbn_options && project.pbn_options.length > 0 ? (
+                    {hasHardOption && project.pbn_options ? (
                         <Stack spacing={3}>
                             <PBNDifficultyOptions
                                 publicId={publicId}
@@ -552,7 +554,7 @@ export function ProjectDetailsPage() {
                                 disabled={running || isProcessingActive}
                                 onSelect={handleDifficultySelect}
                             />
-                            {project.selected_pbn_difficulty && (
+                            {project.selected_pbn_difficulty === "hard" && (
                                 <PbnProcessCarousel
                                     publicId={publicId}
                                     files={files}
@@ -593,7 +595,7 @@ function validateImageFile(file: File): string | null {
 function statusProgressLabel(status: string, stage: string | null): string {
     if (status === "ai_queued" || status === "ai_image_queued") return "Queued for AI image generation";
     if (status === "pbn_queued") return "Queued for PBN generation";
-    if (status === "pbn_options_queued") return "Queued to generate difficulty options";
+    if (status === "pbn_options_queued") return "Queued to generate Hard PBN";
     if (status === "pbn_selection_queued") return "Queued to create printable files";
     const labels: Record<string, string> = {
         preparing_source: "Applying the approved print composition",
@@ -605,11 +607,11 @@ function statusProgressLabel(status: string, stage: string | null): string {
         cleaning_regions: "Merging unpaintable fragments",
         validating_template: "Checking physical print requirements",
         generating_template: "Writing validated print files",
-        options_ready: "Difficulty options are ready",
+        options_ready: "Hard PBN preview is ready",
     };
     if (stage) return labels[stage] ?? stage;
     if (status === "pbn_processing") return "Processing paint-by-number outputs";
-    if (status === "pbn_options_processing") return "Generating Easy, Medium, and Hard options";
+    if (status === "pbn_options_processing") return "Generating Hard PBN";
     if (status === "pbn_selection_processing") return "Creating selected printable files";
     return "Processing AI image";
 }

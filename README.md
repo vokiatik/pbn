@@ -11,7 +11,7 @@ React frontend
 -> generated files in shared storage
 ```
 
-The only supported workflow is the AI pipeline. Legacy step-by-step segmentation, V2 printable, and V3 graph-first workflows have been removed. The current app generates saved Easy, Medium, and Hard options for explicit user selection.
+The only supported workflow is the AI pipeline. Legacy step-by-step segmentation, V2 printable, and V3 graph-first workflows have been removed. The app generates one saved Hard preview, followed by explicit creation of its printable files.
 
 ## Product Flow
 
@@ -20,8 +20,8 @@ The only supported workflow is the AI pipeline. Legacy step-by-step segmentation
 3. For HEIC/HEIF uploads, backend queues browser-safe preview generation.
 4. User chooses AI settings and starts AI image generation.
 5. Worker consumes `generate_ai_image`, calls the runner, registers `ai_simplified`, and stops for review.
-6. User can regenerate the AI image or generate saved Easy, Medium, and Hard PBN options.
-7. User explicitly selects one option; only that saved option is exported, and the selection can be changed later.
+6. User can regenerate the AI image or generate the saved Hard PBN preview.
+7. User clicks Create Hard printable files to export that saved result.
 7. Worker consumes `continue_ai_pipeline`, derives regions/templates from the reviewed AI image, registers public artifacts, and publishes WebSocket events.
 8. Frontend shows status, output previews, and downloadable files.
 
@@ -60,7 +60,7 @@ PBN_OPTION_MAX_ATTEMPTS=5
 
 `OPENAI_IMAGE_MODERATION` accepts `low` (the default, less restrictive filtering) or `auto` (standard filtering). Moderation blocks still return OpenAI's coarse stage and category details so the UI can suggest whether to revise the prompt/input image or regenerate.
 
-`PBN_OPTION_MAX_ATTEMPTS` limits deterministic local density attempts per difficulty, including the initial attempt. Values are clamped to `1-5`; retries never make another AI provider call or change the requested palette. Attempt densities are ceilings: unsupported flat-image boundaries are merged even below the ceiling, while Medium/Hard use a shared 9,450-atom base to retain source-supported detail. Printed number labels choose the largest fitting 4, 3, 2, or 1 mm height.
+`PBN_OPTION_MAX_ATTEMPTS` limits deterministic local attempts for Hard, including the initial attempt. Values are clamped to `1-5`; generation stops at the first valid result. Retries never make another AI provider call or change the requested palette. The reviewed image is analyzed once into cached connected source regions. Hard starts with a density ceiling of 650 regions. Printed number labels choose the largest fitting 4, 3, 2, or 1 mm height. Set `PBN_DEBUG_IMAGES=1` to retain internal stage images.
 
 If the requested/default provider is not configured but exactly one other provider is configured, the runner uses the configured provider. Otherwise generation fails with a configuration error.
 

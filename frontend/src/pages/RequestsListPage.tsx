@@ -25,9 +25,9 @@ function getProjectPhase(status: string): string {
     if (status === "ai_image_ready") return "Review AI image";
     if (status === "pbn_queued") return "PBN queued";
     if (status === "pbn_processing") return "Generating PBN";
-    if (status === "pbn_options_queued") return "PBN options queued";
-    if (status === "pbn_options_processing") return "Generating difficulty options";
-    if (status === "pbn_options_ready") return "Choose difficulty";
+    if (status === "pbn_options_queued") return "Hard PBN queued";
+    if (status === "pbn_options_processing") return "Generating Hard PBN";
+    if (status === "pbn_options_ready") return "Hard preview ready";
     if (status === "pbn_selection_queued") return "Selection queued";
     if (status === "pbn_selection_processing") return "Creating printable files";
     if (status === "pbn_selection_failed") return "Selection failed";

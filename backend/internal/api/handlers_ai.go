@@ -182,7 +182,7 @@ func (s *Server) handleProceedAIPipeline(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you can only proceed with projects created in this browser"})
 		return
 	}
-	if project.Status != "ai_image_ready" && project.Status != "pbn_failed" {
+	if project.Status != "ai_image_ready" && project.Status != "pbn_failed" && project.Status != "pbn_options_ready" && project.Status != "pbn_selection_failed" && project.Status != "ai_completed" {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "PBN generation can proceed only after an AI image is ready"})
 		return
 	}
@@ -229,8 +229,8 @@ func (s *Server) handleSelectPBNDifficulty(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	req.Difficulty = strings.ToLower(strings.TrimSpace(req.Difficulty))
-	if req.Difficulty != "easy" && req.Difficulty != "medium" && req.Difficulty != "hard" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "difficulty must be easy, medium, or hard"})
+	if req.Difficulty != "hard" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "only hard PBN output is supported"})
 		return
 	}
 	if !savedOptionExists(project.PBNOptions, req.Difficulty) {
@@ -343,6 +343,9 @@ func (s *Server) enqueuePBNSelection(r *http.Request, project repository.Project
 }
 
 func savedOptionExists(raw json.RawMessage, difficulty string) bool {
+	if difficulty != "hard" {
+		return false
+	}
 	var options []struct {
 		Difficulty string `json:"difficulty"`
 		Status     string `json:"status"`
@@ -399,6 +402,14 @@ func (s *Server) handleInternalPBNOptionsUpdate(w http.ResponseWriter, r *http.R
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "PBN options must be an array"})
 		return
 	}
+	if len(options) != 1 || options[0]["difficulty"] != "hard" || options[0]["status"] != "valid" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected one valid hard PBN option"})
+		return
+	}
+	if err := s.unregisterDownstreamAIFiles(r.Context(), projectID); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to replace stale PBN files"})
+		return
+	}
 	if err := s.repo.UpdateProjectPBNOptions(r.Context(), projectID, req.Options); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save PBN options"})
 		return
@@ -445,7 +456,7 @@ func (s *Server) handleInternalPBNSelectionUpdate(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid selection"})
 		return
 	}
-	if req.Difficulty != "easy" && req.Difficulty != "medium" && req.Difficulty != "hard" {
+	if req.Difficulty != "hard" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid difficulty"})
 		return
 	}

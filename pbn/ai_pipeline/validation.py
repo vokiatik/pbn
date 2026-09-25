@@ -81,6 +81,11 @@ def validate_template_inputs(
         width_mm = record.estimated_thickness * mm_per_source_pixel
         areas_mm2.append(area_mm2)
         widths_mm.append(width_mm)
+        if record.components != 1:
+            issues.append(ValidationIssue(
+                "disconnected_region", "fail",
+                "each numbered region must contain one four-connected component", region_id,
+            ))
         if region_id in protected_ids:
             if area_mm2 + 1e-6 < 0.5:
                 issues.append(ValidationIssue("protected_detail_too_small", "fail", "protected detail is below the 0.5 mm² printer floor", region_id))
@@ -110,6 +115,8 @@ def validate_template_inputs(
         issues.append(ValidationIssue("invalid_palette_id", "fail", "palette ids must start at one"))
     if palette_rgb is not None and any(color_id > len(palette_rgb) for color_id in active_colors):
         issues.append(ValidationIssue("invalid_palette_id", "fail", "a region references a missing palette colour"))
+    if palette_rgb is not None and len(set(map(tuple, palette_rgb))) != len(palette_rgb):
+        issues.append(ValidationIssue("duplicate_palette_colour", "fail", "different paint numbers must not have identical colours"))
 
     same_color_edges = _same_colour_adjacency_count(region_map, region_to_color)
     if same_color_edges:
@@ -219,6 +226,17 @@ def validate_template_inputs(
             "minimum_label_height_mm": numbering_stats.minimum_label_height_mm if numbering_stats else 0.0,
             "label_height_counts": numbering_stats.label_height_counts if numbering_stats else {},
             "min_region_area_mm2": min(areas_mm2, default=0.0),
+            "mean_region_area_mm2": float(np.mean(areas_mm2)) if areas_mm2 else 0.0,
+            "median_region_area_mm2": float(np.median(areas_mm2)) if areas_mm2 else 0.0,
+            "regions_below_print_floor": sum(
+                area < 0.5 or width < 0.5
+                for area, width in zip(areas_mm2, widths_mm, strict=True)
+            ),
+            "boundary_complexity": float(np.mean([
+                record.perimeter / max(1.0, np.sqrt(record.area))
+                for record in records
+            ])) if records else 0.0,
+            "disconnected_island_count": sum(max(0, record.components - 1) for record in records),
             "min_estimated_width_mm": min(widths_mm, default=0.0),
             "min_label_pocket_mm": numbering_stats.minimum_label_pocket_mm if numbering_stats else 0.0,
             "painted_reference_mismatch_pixels": consistency_failures,

@@ -11,6 +11,9 @@ This app stores local runtime files under `/storage/projects/{public_id}`. Backe
   generated/
     upload_preview.jpg
   pipeline_ai/
+    analysis/
+      source_atoms.npy
+      manifest.json
     input/
       detail_protection.png
       detail_protection.json
@@ -27,16 +30,14 @@ This app stores local runtime files under `/storage/projects/{public_id}`. Backe
       quality_preview.png
     options/
       options.json
-      attempt_reports/{easy|medium|hard}-{attempt}.json
-      .attempts/{easy|medium|hard}/{attempt}/failure/diagnostics.json
-      .attempts/{easy|medium|hard}/{attempt}/failure/region_id_map.npy
-      .attempts/{easy|medium|hard}/{attempt}/failure/region_map.png
-      easy/label_plan.json
-      medium/label_plan.json
+      attempt_reports/hard-{attempt}.json
+      .attempts/hard/{attempt}/failure/diagnostics.json
+      .attempts/hard/{attempt}/failure/region_id_map.npy
+      .attempts/hard/{attempt}/failure/region_map.png
       hard/label_plan.json
-      {easy|medium|hard}/regions/detail_protection.png
-      {easy|medium|hard}/regions/detail_protection.json
-      {easy|medium|hard}/regions/selected_source_edges.png
+      hard/regions/detail_protection.png
+      hard/regions/detail_protection.json
+      hard/regions/selected_source_edges.png
     regions/
       slico_map.png
       graph_merged_map.png
@@ -93,14 +94,12 @@ These are the file records the worker registers with the backend.
 | `ai_final_palette` | `pipeline_ai/export/pbn_final_palette.png` | Printable palette PNG. |
 | `ai_template_pdf` | `pipeline_ai/export/pbn_template.pdf` | Printable template PDF. |
 | `ai_palette_pdf` | `pipeline_ai/export/palette_sheet.pdf` | Printable palette PDF. |
-| `ai_easy_painted_preview` | `pipeline_ai/options/easy/painted_reference.png` | Saved Easy coloured preview. |
-| `ai_easy_template_preview` | `pipeline_ai/options/easy/numbered_template.png` | Saved Easy template preview. |
-| `ai_medium_painted_preview` | `pipeline_ai/options/medium/painted_reference.png` | Saved Medium coloured preview. |
-| `ai_medium_template_preview` | `pipeline_ai/options/medium/numbered_template.png` | Saved Medium template preview. |
 | `ai_hard_painted_preview` | `pipeline_ai/options/hard/painted_reference.png` | Saved Hard coloured preview. |
 | `ai_hard_template_preview` | `pipeline_ai/options/hard/numbered_template.png` | Saved Hard template preview. |
 
 ## Frontend File List
+
+Easy and Medium preview types are historical only. New jobs register only Hard previews, and successful regeneration removes stale option folders and unregisters previous PBN outputs before publishing the new Hard files.
 
 The project details page groups the registered outputs into these user-facing downloads:
 
@@ -117,7 +116,7 @@ Other registered outputs are secondary pipeline artifacts and are not shown in t
 
 ## Internal Trace Files
 
-The runner also writes trace files such as `crop_manifest.json`, internal `provider_output.png`, `generation.json`, `quality_report.json`, the quality reconstruction preview, `boundary_strength.png`, protection/stage maps, merge and cleanup logs, per-option metadata and `label_plan.json`, `regions.json`, `adjacency.json`, `.npy` maps, `export_result.json`, and `pipeline_result.json`. `input/detail_protection.png` is the exact-size binary user mask; its JSON manifest records dimensions, coverage, SHA-256, and update time. Selected options retain the normalized mask, selected source-edge trace, hybrid geometry counts, selected-boundary retention, selected prefill/forced-merge counts, and protection-only overflow. Alignment traces record the requested and selected snap radius, changed pixels, boundary length, source-edge support, reconstruction change, and topology result. `options/options.json` records the bounded search settings, validation metrics, rejection reasons, and selected attempt; `options/attempt_reports/` retains each lightweight validation report. After a successful search, large images and arrays for rejected attempts are removed. When every option fails, `options/.attempts/` is retained until the next search and contains the last intermediate region map plus structured failure-stage, affected-region, rejected-radius, or blocked-boundary diagnostics. These traces are useful for debugging but are not public artifacts. Invalid options never become public previews or exports.
+The runner also writes trace files such as `crop_manifest.json`, internal `provider_output.png`, `generation.json`, `quality_report.json`, the quality reconstruction preview, cached `analysis/source_atoms.npy` and its SHA-256 manifest, `boundary_strength.png`, protection/stage maps, merge and cleanup logs, per-option metadata and `label_plan.json`, `regions.json`, `adjacency.json`, `.npy` maps, `export_result.json`, and `pipeline_result.json`. `input/detail_protection.png` is the exact-size binary user mask; its JSON manifest records dimensions, coverage, SHA-256, and update time. Selected options retain the selected source-edge trace, stage counts, physical-floor merge count, region-area summaries, boundary complexity, stage timings, selected-boundary retention, and forced-merge counts. With `PBN_DEBUG_IMAGES=1`, selected options also retain eight internal stage images in `debug/`. Alignment traces record the requested and selected snap radius, changed pixels, boundary length, source-edge support, reconstruction change, and topology result. `options/options.json` records bounded search settings, validation metrics, rejection reasons, and selected attempt; `options/attempt_reports/` retains each lightweight validation report. After a successful search, rejected attempts are removed. When every option fails, `options/.attempts/` is retained until the next search and contains the last intermediate region map plus structured failure diagnostics. Invalid options never become public previews or exports.
 
 ## Update Rules
 

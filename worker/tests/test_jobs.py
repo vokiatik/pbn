@@ -57,7 +57,7 @@ class FakeRunner:
 
     def continue_ai_pipeline(self, **kwargs) -> dict:
         self.continue_calls += 1
-        return {"ok": True, "result": {"metrics": {"options": [{"difficulty": "easy", "status": "valid"}]}}}
+        return {"ok": True, "result": {"metrics": {"options": [{"difficulty": "hard", "status": "valid"}]}}}
 
     def finalize_pbn_option(self, **kwargs) -> dict:
         self.finalize_calls += 1
@@ -91,6 +91,8 @@ def test_generate_ai_image_job_registers_only_review_image(tmp_path: Path) -> No
 def test_continue_ai_pipeline_job_registers_saved_options(tmp_path: Path) -> None:
     for _, rel_path in PUBLIC_PBN_OPTION_FILES:
         _write_project_file(tmp_path, rel_path)
+    for legacy in ("easy", "medium"):
+        _write_project_file(tmp_path, f"pipeline_ai/options/{legacy}/numbered_template.png")
     backend = FakeBackend()
     runner = FakeRunner()
     events = FakeEvents()
@@ -100,10 +102,11 @@ def test_continue_ai_pipeline_job_registers_saved_options(tmp_path: Path) -> Non
 
     assert runner.continue_calls == 1
     assert backend.statuses[-1] == "pbn_options_ready"
-    assert backend.options == [{"difficulty": "easy", "status": "valid"}]
+    assert backend.options == [{"difficulty": "hard", "status": "valid"}]
     registered_types = {file["file_type"] for file in backend.file_batches[-1]}
     assert "ai_simplified" in registered_types
-    assert "ai_easy_template_preview" in registered_types
+    assert "ai_hard_template_preview" in registered_types
+    assert not any("easy" in file_type or "medium" in file_type for file_type in registered_types)
     assert "ai_final" not in registered_types
 
 

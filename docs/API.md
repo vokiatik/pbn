@@ -110,11 +110,11 @@ Response:
 
 Queue PBN generation from the reviewed `ai_simplified` image. Requires `X-Client-Token` matching the browser that created the project.
 
-The endpoint accepts no settings body. It uses the exact settings saved by `/run` and queues generation of saved Easy, Medium, and Hard PBN options. It does not select or export a difficulty. Existing reviewed projects without saved settings must regenerate their AI image first. No AI provider call is made during proceed.
+The endpoint accepts no settings body. It uses the exact settings saved by `/run` and generates one saved Hard PBN preview. It does not export printable files until `/select-pbn` is called. Existing reviewed projects without saved settings must regenerate their AI image first. No AI provider call is made during proceed.
 
-Can run only when the project status is `ai_image_ready` or `pbn_failed`.
+Can run when the project status is `ai_image_ready`, `pbn_failed`, `pbn_options_ready`, `pbn_selection_failed`, or `ai_completed`. This lets older projects generate Hard from their existing reviewed image.
 
-When a Preserve Detail mask exists, the runner uses source-pixel microregions only in the filled selected area and keeps the normal SLIC path elsewhere. Meaningful selected boundaries receive difficulty-scaled minimum protection in addition to the normal evidence multiplier. This is local deterministic processing and does not make another provider call.
+When a Preserve Detail mask exists, its weights guide source-supported boundaries in the shared connected region graph. It does not create independent processing areas. Processing is deterministic and does not make another provider call.
 
 Response:
 
@@ -130,10 +130,10 @@ Response:
 Explicitly select one saved valid option and queue its printable PNG/PDF exports. Requires the matching `X-Client-Token`.
 
 ```json
-{"difficulty":"easy"}
+{"difficulty":"hard"}
 ```
 
-`difficulty` must be `easy`, `medium`, or `hard` and must exist in `project.pbn_options`. The saved region map is reused; no AI or segmentation work is repeated. The endpoint is available from `pbn_options_ready`, `ai_completed`, or `pbn_selection_failed`.
+`difficulty` must be `hard` and must exist as a valid entry in `project.pbn_options`. Easy and Medium requests are rejected. The saved region map is reused; no AI or segmentation work is repeated. The endpoint is available from `pbn_options_ready`, `ai_completed`, or `pbn_selection_failed`.
 
 ### Preserve Detail mask
 
@@ -144,7 +144,7 @@ These owner-protected endpoints manage the binary mask attached to the current r
 - `PUT /api/projects/{public_id}/detail-protection` accepts an `image/png` body up to 4 MiB.
 - `DELETE /api/projects/{public_id}/detail-protection` clears the mask.
 
-The PNG must exactly match the reviewed image dimensions. The backend normalizes it to 8-bit binary pixels and stores it under a fixed server path; white selects advanced processing and black keeps normal processing. Metadata includes dimensions, coverage percentage, SHA-256, update time, and `large_selection`, which becomes true above 40% coverage.
+The PNG must exactly match the reviewed image dimensions. The backend normalizes it to 8-bit binary pixels and stores it under a fixed server path; white emphasizes source-supported boundaries and black keeps the ordinary graph weights. Metadata includes dimensions, coverage percentage, SHA-256, update time, and `large_selection`, which becomes true above 40% coverage.
 
 Mask changes are allowed only while the project is idle and a reviewed AI image exists. Saving or deleting a mask invalidates existing PBN options and exports, clears the selected difficulty, and returns the project to `ai_image_ready`. Replacing the source or regenerating the reviewed AI image clears the mask.
 
@@ -200,9 +200,9 @@ Response:
       }
     },
     "pbn_options": [
-      {"difficulty":"easy","status":"valid","region_count":340,"palette_size":24,"prefilled_detail_count":8,"prefilled_area_percent":0.4,"adaptive_label_count":17,"minimum_label_font_pt":3.5,"region_budget_overflow_percent":0,"protected_boundary_retention":0.94,"protected_mean_delta_e_00":5.7,"protected_p90_delta_e_00":12.1,"advanced_area_percent":6.4,"selected_boundary_retention":0.91,"selected_prefilled_detail_count":3,"selected_forced_merge_count":0,"palette_protected_forced_merge_count":0,"protection_overflow_percent":0}
+      {"difficulty":"hard","status":"valid","region_count":340,"palette_size":24,"prefilled_detail_count":8,"prefilled_area_percent":0.4,"adaptive_label_count":17,"minimum_label_font_pt":3.5,"region_budget_overflow_percent":0,"protected_boundary_retention":0.94,"protected_mean_delta_e_00":5.7,"protected_p90_delta_e_00":12.1,"advanced_area_percent":6.4,"selected_boundary_retention":0.91,"selected_prefilled_detail_count":3,"selected_forced_merge_count":0,"palette_protected_forced_merge_count":0,"protection_overflow_percent":0}
     ],
-    "selected_pbn_difficulty": "easy",
+    "selected_pbn_difficulty": "hard",
     "error_message": null,
     "files_count": 13
   },

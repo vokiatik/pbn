@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -23,11 +25,6 @@ from .detail_protection import (
     selected_boundary_mask,
     write_protection_trace,
 )
-from .hybrid_geometry import (
-    build_hybrid_geometry,
-    collapse_unsupported_seams,
-    unsupported_seam_edge_count,
-)
 from .io_utils import atomic_write_json, save_label_map_png, save_rgb
 from .models import (
     ImageSimplificationProvider,
@@ -38,9 +35,7 @@ from .models import (
 from .option_search import (
     DIFFICULTY_ORDER,
     OptionCandidate,
-    coordinated_density_ceiling,
     density_target,
-    has_optimal_triplet,
     option_max_attempts,
     select_option_candidates,
 )
@@ -52,13 +47,13 @@ from .regions import build_adjacency, build_region_records, record_to_dict
 from .segmentation import (
     RetryProfile,
     _align_boundaries_to_source,
+    _enforce_physical_constraints,
     _protected_edge_mask,
     _source_mm_per_pixel,
     _source_edge_strength,
-    create_slic_atoms,
+    create_structural_atoms,
     region_boundary_evidence,
     retry_profiles,
-    segment_paint_regions,
 )
 from .source_prep import crop_provider_output, prepare_source_image
 from .template_export import build_print_artifacts, render_template_and_exports
@@ -216,44 +211,34 @@ def continue_ai_pipeline(
     work_root.mkdir(parents=True, exist_ok=True)
     attempt_reports_root.mkdir(parents=True, exist_ok=True)
 
-    geometry_label = " with protected microregions" if detail_protection is not None else ""
-    _report_progress(progress_callback, "extracting_regions", 35, f"Building simplified Easy geometry{geometry_label}")
-    geometry_bases = {
-        "easy": _build_geometry_base(
-            reviewed_output,
-            work_root / "bases" / "easy",
-            print_spec,
-            profiles["easy"],
-            detail_protection,
-        ),
-    }
-    _report_progress(progress_callback, "extracting_regions", 42, "Building shared Medium and Hard detail geometry")
-    geometry_bases["detail"] = _build_geometry_base(
+    _report_progress(progress_callback, "extracting_regions", 35, "Analyzing reviewed image structure")
+    source_atoms, source_rgb, analysis_metrics = create_structural_atoms(
+        reviewed_output, root / "analysis", print_spec
+    )
+    _report_progress(progress_callback, "extracting_regions", 42, "Building shared paintable region graph")
+    geometry_base = _build_geometry_base(
         reviewed_output,
-        work_root / "bases" / "detail",
+        work_root / "bases" / "shared",
         print_spec,
         profiles["hard"],
         detail_protection,
+        source_atoms=source_atoms,
+        source_rgb=source_rgb,
+        analysis_metrics=analysis_metrics,
     )
 
     attempts: list[dict[str, object]] = []
     valid_candidates: list[OptionCandidate] = []
     candidate_dirs: dict[str, Path] = {}
-    medium_compaction_observations: list[tuple[int, int]] = []
     max_attempts = option_max_attempts()
-    total_attempts = max_attempts * len(DIFFICULTY_ORDER)
+    total_attempts = max_attempts
     completed_attempts = 0
 
     for attempt_index in range(max_attempts):
-        for difficulty in DIFFICULTY_ORDER:
+        for difficulty in ("hard",):
             profile = profiles[difficulty]
             density = density_target(difficulty, attempt_index)
-            compaction_ceiling = coordinated_density_ceiling(
-                difficulty,
-                density,
-                valid_candidates,
-                medium_compaction_observations,
-            )
+            compaction_ceiling = density
             progress = 45 + int(round(48 * completed_attempts / max(1, total_attempts)))
             _report_progress(
                 progress_callback,
@@ -263,7 +248,7 @@ def continue_ai_pipeline(
                 f"(target {density}, compaction ceiling {compaction_ceiling} regions)",
             )
             attempt_dir = work_root / difficulty / str(attempt_index + 1)
-            base = geometry_bases["easy" if difficulty == "easy" else "detail"]
+            base = geometry_base
             attempt_record, candidate = _build_option_attempt(
                 attempt_dir,
                 difficulty,
@@ -302,13 +287,9 @@ def continue_ai_pipeline(
             if candidate is not None:
                 valid_candidates.append(candidate)
                 candidate_dirs[candidate.artifact_key] = attempt_dir
-                if difficulty == "medium":
-                    medium_compaction_observations.append(
-                        (compaction_ceiling, candidate.region_count)
-                    )
             completed_attempts += 1
 
-        if has_optimal_triplet(valid_candidates):
+        if valid_candidates:
             break
 
     selected = select_option_candidates(valid_candidates)
@@ -369,7 +350,7 @@ def continue_ai_pipeline(
         },
     }
     atomic_write_json(root / "options_result.json", result)
-    _report_progress(progress_callback, "options_ready", 100, "PBN difficulty options are ready for selection")
+    _report_progress(progress_callback, "options_ready", 100, "Hard PBN preview is ready")
     return root, result
 
 
@@ -379,40 +360,34 @@ def _build_geometry_base(
     print_spec: PrintSpec,
     profile: RetryProfile,
     detail_protection: DetailProtection | None = None,
+    *,
+    source_atoms: np.ndarray | None = None,
+    source_rgb: np.ndarray | None = None,
+    analysis_metrics: dict[str, object] | None = None,
 ) -> dict[str, object]:
-    if detail_protection is None:
-        region_map, source_rgb, geometry_log = segment_paint_regions(
-            reviewed_output,
-            base_dir / "regions",
-            print_spec,
-            profile,
+    if source_atoms is None or source_rgb is None:
+        source_atoms, source_rgb, analysis_metrics = create_structural_atoms(
+            reviewed_output, base_dir / "analysis", print_spec
         )
-    else:
-        region_map, source_rgb = create_slic_atoms(reviewed_output, profile)
-        regions_dir = base_dir / "regions"
-        regions_dir.mkdir(parents=True, exist_ok=True)
-        save_label_map_png(region_map, regions_dir / "slico_map.png")
-        np.save(regions_dir / "slico_id_map.npy", region_map)
-        geometry_log = [
-            {
-                "operation": "slico_atom_summary",
-                "initial_region_count": int(np.unique(region_map[region_map > 0]).size),
-                "hybrid_processing": True,
-            }
-        ]
+    regions_dir = base_dir / "regions"
+    regions_dir.mkdir(parents=True, exist_ok=True)
+    save_label_map_png(source_atoms, regions_dir / "source_atoms.png")
+    region_map = source_atoms
+    save_label_map_png(region_map, regions_dir / "initial_region_map.png")
+    np.save(regions_dir / "region_id_map.npy", region_map)
+    geometry_log = [{"operation": "structural_analysis", **(analysis_metrics or {})}]
     boundary_evidence = region_boundary_evidence(source_rgb, region_map)
     hybrid_metrics: dict[str, object] = {}
     selection_coverage: dict[tuple[int, int], float] = {}
     selected_edge_mask = np.zeros(region_map.shape, dtype=bool)
-    advanced_zone_mask = np.zeros(region_map.shape, dtype=bool)
     if detail_protection is not None:
-        hybrid = build_hybrid_geometry(source_rgb, region_map, detail_protection, print_spec)
-        region_map = hybrid.label_map
-        boundary_evidence = hybrid.boundary_evidence
-        selection_coverage = hybrid.selection_coverage
-        hybrid_metrics = hybrid.metrics
-        advanced_zone_mask = hybrid.advanced_zone
-        geometry_log = [*geometry_log, *hybrid.geometry_log]
+        selection_coverage = boundary_selection_coverage(region_map, detail_protection.weight)
+        hybrid_metrics = {
+            "selected_area_percent": detail_protection.coverage_percent,
+            "base_region_count": int(region_map.max()),
+            "hybrid_region_count": int(region_map.max()),
+            "source_guided_selection": True,
+        }
         meaningful_pairs = meaningful_selected_pairs(
             source_rgb,
             region_map,
@@ -420,8 +395,6 @@ def _build_geometry_base(
             selection_coverage,
         )
         selected_edge_mask = selected_boundary_mask(region_map, meaningful_pairs)
-        save_label_map_png(region_map, base_dir / "regions" / "hybrid_region_map.png")
-        np.save(base_dir / "regions" / "hybrid_region_id_map.npy", region_map)
         write_protection_trace(
             base_dir / "regions" / "detail_protection.json",
             detail_protection,
@@ -439,14 +412,17 @@ def _build_geometry_base(
             protection_scores[pair[1]] = max(protection_scores.get(pair[1], 0.0), value)
         protection_mask = _protected_edge_mask(region_map, boundary_evidence)
     else:
-        protection = _protection_metadata(geometry_log)
-        protected_ids = {int(value) for value in protection["protected_region_ids"]}
-        protection_scores = {
-            int(key): float(value)
-            for key, value in dict(protection["region_protection_scores"]).items()
+        protected_ids = {
+            region_id for pair, value in boundary_evidence.items()
+            if value >= 0.70 for region_id in pair
         }
-        protection_mask = np.load(base_dir / "regions" / "protection_mask.npy").astype(bool)
+        protection_scores = {}
+        for pair, value in boundary_evidence.items():
+            protection_scores[pair[0]] = max(protection_scores.get(pair[0], 0.0), value)
+            protection_scores[pair[1]] = max(protection_scores.get(pair[1], 0.0), value)
+        protection_mask = _protected_edge_mask(region_map, boundary_evidence)
     return {
+        "source_atoms": source_atoms,
         "region_map": region_map,
         "source_rgb": source_rgb,
         "geometry_log": geometry_log,
@@ -460,7 +436,6 @@ def _build_geometry_base(
         "selection_coverage": selection_coverage,
         "selected_edge_mask": selected_edge_mask,
         "hybrid_metrics": hybrid_metrics,
-        "advanced_zone_mask": advanced_zone_mask,
     }
 
 
@@ -475,6 +450,8 @@ def _build_option_attempt(
     target_palette_size: int,
     print_spec: PrintSpec,
 ) -> tuple[dict[str, object], OptionCandidate | None]:
+    attempt_started = time.perf_counter()
+    stage_seconds = {"palette_and_graph": 0.0, "physical_floor": 0.0, "source_edge_alignment": 0.0, "template": 0.0}
     attempt_number = attempt_index + 1
     failure_stage = "initialization"
     failure_map: np.ndarray | None = None
@@ -512,7 +489,6 @@ def _build_option_attempt(
         selection_coverage = base.get("selection_coverage", {})
         selected_edge_mask = base.get("selected_edge_mask")
         hybrid_metrics = base.get("hybrid_metrics", {})
-        advanced_zone_mask = base.get("advanced_zone_mask")
         assert isinstance(region_map, np.ndarray)
         assert isinstance(source_rgb, np.ndarray)
         assert isinstance(geometry_log, list)
@@ -526,7 +502,6 @@ def _build_option_attempt(
         assert isinstance(selection_coverage, dict)
         assert isinstance(selected_edge_mask, np.ndarray)
         assert isinstance(hybrid_metrics, dict)
-        assert isinstance(advanced_zone_mask, np.ndarray)
         failure_map = region_map
         failure_rgb = source_rgb
 
@@ -560,11 +535,17 @@ def _build_option_attempt(
         working_protected_ids = protected_ids
         working_protection_scores = protection_scores
         working_boundary_evidence = boundary_evidence
+        mm_per_source_pixel = _source_mm_per_pixel(region_map.shape, print_spec)
         labelability_merge_count = 0
+        physical_floor_merges = 0
+        palette_region_map: np.ndarray | None = None
+        first_palette_preview: np.ndarray | None = None
+        first_floor_region_count: int | None = None
         boundary_alignment: dict[str, object] = {}
         aggregate_fidelity_metrics: dict[str, int] = {
             "weak_boundary_merge_count": 0,
             "density_merge_count": 0,
+            "physical_constraint_merge_count": 0,
             "palette_conflict_merge_count": 0,
             "faithful_alternative_colour_count": 0,
             "selected_forced_merge_count": 0,
@@ -575,6 +556,7 @@ def _build_option_attempt(
             failure_stage = "palette_derivation"
             failure_map = working_map
             failure_palette_size = None
+            stage_started = time.perf_counter()
             final_map, painted, region_to_color, palette_rgb, assignments = derive_region_palette(
                 source_rgb,
                 working_map,
@@ -584,10 +566,16 @@ def _build_option_attempt(
                 protection_scores=working_protection_scores,
                 boundary_evidence=working_boundary_evidence,
                 target_region_count=compaction_ceiling,
-                dynamic_compaction=detail_protection is not None,
+                dynamic_compaction=True,
                 maximum_region_count=(compaction_ceiling * 110 + 99) // 100,
                 user_protected_pairs=user_protected_pairs,
+                minimum_area_pixels=0.5 / mm_per_source_pixel**2,
+                minimum_width_pixels=0.5 / mm_per_source_pixel,
             )
+            stage_seconds["palette_and_graph"] += time.perf_counter() - stage_started
+            if palette_region_map is None:
+                palette_region_map = final_map
+                first_palette_preview = painted.copy()
             failure_map = final_map
             failure_palette_size = len(palette_rgb)
             fidelity_metrics = _load_json(attempt_dir / "palette" / "fidelity_metrics.json")
@@ -604,7 +592,29 @@ def _build_option_attempt(
                 final_map,
                 working_protection_scores,
             )
+            failure_stage = "physical_floor"
+            before_floor_map = final_map
+            stage_started = time.perf_counter()
+            final_map, floor_log = _enforce_physical_constraints(
+                source_rgb,
+                final_map,
+                print_spec,
+                _protected_edge_mask(final_map, region_boundary_evidence(source_rgb, final_map)),
+                min_area_mm2=0.5,
+                min_width_mm=0.5,
+                min_label_pocket_mm=0.0,
+            )
+            stage_seconds["physical_floor"] += time.perf_counter() - stage_started
+            physical_floor_merges += len(floor_log)
+            if first_floor_region_count is None:
+                first_floor_region_count = int(final_map.max())
+            if floor_log:
+                final_protected_ids = _remap_region_ids(before_floor_map, final_map, final_protected_ids)
+                final_protection_scores = _remap_region_scores(
+                    before_floor_map, final_map, final_protection_scores
+                )
             failure_stage = "source_edge_alignment"
+            stage_started = time.perf_counter()
             final_map, boundary_alignment, _ = _align_boundaries_to_source(
                 source_rgb,
                 final_map,
@@ -614,31 +624,10 @@ def _build_option_attempt(
                 prepared_edge_strength=edge_strength,
                 prepared_source_lab=source_lab,
             )
+            stage_seconds["source_edge_alignment"] += time.perf_counter() - stage_started
             failure_map = final_map
             post_alignment_palette_merges = 0
-            post_alignment_seam_merges = 0
             for _ in range(8):
-                seam_merges = 0
-                if detail_protection is not None:
-                    failure_stage = "transition_seam_cleanup"
-                    before_seam_map = final_map
-                    final_map, seam_merges = collapse_unsupported_seams(
-                        source_rgb,
-                        final_map,
-                        advanced_zone_mask,
-                    )
-                    if seam_merges:
-                        final_protected_ids = _remap_region_ids(
-                            before_seam_map,
-                            final_map,
-                            final_protected_ids,
-                        )
-                        final_protection_scores = _remap_region_scores(
-                            before_seam_map,
-                            final_map,
-                            final_protection_scores,
-                        )
-                post_alignment_seam_merges += seam_merges
                 failure_map = final_map
 
                 aligned_evidence = region_boundary_evidence(source_rgb, final_map)
@@ -706,12 +695,12 @@ def _build_option_attempt(
                 )
                 palette_merges = int(reconciliation_metrics.get("palette_conflict_merge_count", 0))
                 post_alignment_palette_merges += palette_merges
-                if seam_merges == 0 and palette_merges == 0:
+                if palette_merges == 0:
                     break
             else:
-                raise ValueError("post-alignment seam and palette reconciliation did not converge")
+                raise ValueError("post-alignment palette reconciliation did not converge")
             boundary_alignment["post_alignment_palette_merge_count"] = post_alignment_palette_merges
-            boundary_alignment["post_alignment_seam_merge_count"] = post_alignment_seam_merges
+            boundary_alignment["post_alignment_seam_merge_count"] = 0
             assignments = [
                 {
                     "region_id": region_id,
@@ -730,6 +719,7 @@ def _build_option_attempt(
                 color_ids=region_to_color,
             )
             failure_stage = "template_rendering"
+            stage_started = time.perf_counter()
             artifacts = build_print_artifacts(
                 final_map,
                 region_to_color,
@@ -738,6 +728,7 @@ def _build_option_attempt(
                 contour_tolerance_mm,
                 protected_region_ids=final_protected_ids,
             )
+            stage_seconds["template"] += time.perf_counter() - stage_started
             merge_for_labels = set(artifacts[2].unnumbered_region_ids)
             prefilled_ids = set(artifacts[2].prefilled_detail_region_ids or [])
             keep_prefilled = _prefilled_ids_within_limit(
@@ -804,15 +795,7 @@ def _build_option_attempt(
         fidelity_metrics["palette_protected_forced_merges"] = aggregate_palette_protected_forced_merges
         fidelity_metrics["labelability_merge_count"] = labelability_merge_count
         fidelity_metrics["artificial_boundary_count"] = int(fidelity_metrics.get("artificial_boundary_count", 0))
-        transition_edge_count = 0
-        if detail_protection is not None:
-            transition_edge_count = unsupported_seam_edge_count(
-                source_rgb,
-                final_map,
-                advanced_zone_mask,
-            )
-            fidelity_metrics["unsupported_transition_edge_count"] = transition_edge_count
-            fidelity_metrics["artificial_boundary_count"] += transition_edge_count
+        fidelity_metrics["unsupported_transition_edge_count"] = 0
         fidelity_metrics["boundary_alignment"] = boundary_alignment
         atomic_write_json(attempt_dir / "palette" / "fidelity_metrics.json", fidelity_metrics)
         reconstruction_delta = _mean_reconstruction_delta_e(source_rgb, painted)
@@ -856,6 +839,19 @@ def _build_option_attempt(
         )
         report.metrics.update(
             {
+                "generation_stages": {
+                    "source_atoms": int(base["source_atoms"].max()),
+                    "after_physical_floor": first_floor_region_count,
+                    "after_graph_and_palette": int(palette_region_map.max()) if palette_region_map is not None else count,
+                    "final_regions": count,
+                    "physical_floor_merges": physical_floor_merges,
+                    "graph_physical_merges": int(fidelity_metrics.get("physical_constraint_merge_count", 0)),
+                    "labelability_merges": labelability_merge_count,
+                },
+                "processing_seconds": {
+                    **{key: round(value, 3) for key, value in stage_seconds.items()},
+                    "attempt_total": round(time.perf_counter() - attempt_started, 3),
+                },
                 "density_target": target_regions,
                 "coordinated_compaction_ceiling": compaction_ceiling,
                 "protected_boundary_retention": retention,
@@ -901,6 +897,9 @@ def _build_option_attempt(
 
         candidate_payload = {
             "profile": profile,
+            "source_atoms": base["source_atoms"],
+            "palette_region_map": palette_region_map,
+            "initial_palette_preview": first_palette_preview,
             "region_map": final_map,
             "source_rgb": source_rgb,
             "painted": painted,
@@ -1068,8 +1067,8 @@ def finalize_pbn_option(
     root = project_dir / AI_PIPELINE_DIR
     parsed = _parse_settings(settings)
     profiles = {profile.name: profile for profile in retry_profiles(parsed.print_spec)}
-    if difficulty not in profiles:
-        raise ValueError("difficulty must be easy, medium, or hard")
+    if difficulty != "hard":
+        raise ValueError("only hard PBN output is supported")
     manifest = _load_json(root / "options" / "options.json")
     valid_names = {str(item.get("difficulty")) for item in manifest.get("options", []) if isinstance(item, dict)}
     if difficulty not in valid_names:
@@ -1117,11 +1116,12 @@ def finalize_pbn_option(
         rebuilt_preview = artifacts[0].copy()
         rebuilt_preview.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
         rebuilt_preview.save(option_dir / "numbered_template.png")
+    generation_metrics = _load_json(option_dir / "validation" / "report.json").get("metrics", {})
     report = validate_template_inputs(
         region_map,
         records,
         region_to_color,
-        option_dir / "validation",
+        root / "validation",
         parsed.target_palette_size,
         print_spec=parsed.print_spec,
         region_budget=profile.region_budget,
@@ -1153,6 +1153,10 @@ def finalize_pbn_option(
             else None
         ),
     )
+    if isinstance(generation_metrics, dict):
+        for key, value in generation_metrics.items():
+            report.metrics.setdefault(key, value)
+    atomic_write_json(root / "validation" / "report.json", report.to_dict())
     if report.status != "pass":
         raise ValueError(f"saved {difficulty} option no longer passes validation")
 
@@ -1453,6 +1457,21 @@ def _save_option_candidate(option_dir: Path, candidate: dict[str, object]) -> No
     if numbering_stats.label_plan:  # type: ignore[union-attr]
         atomic_write_json(option_dir / "label_plan.json", numbering_stats.label_plan)  # type: ignore[union-attr]
     atomic_write_json(option_dir / "validation" / "report.json", report.to_dict())  # type: ignore[union-attr]
+    if os.getenv("PBN_DEBUG_IMAGES", "").strip().lower() in {"1", "true", "yes"}:
+        debug = option_dir / "debug"
+        debug.mkdir(parents=True, exist_ok=True)
+        save_rgb(debug / "01_reviewed.png", candidate["source_rgb"])  # type: ignore[arg-type]
+        save_label_map_png(candidate["source_atoms"], debug / "02_source_atoms.png")  # type: ignore[arg-type]
+        if isinstance(edge_strength, np.ndarray):
+            edges = np.rint(np.clip(edge_strength, 0.0, 1.0) * 255.0).astype(np.uint8)
+            save_rgb(debug / "03_source_edges.png", np.repeat(edges[..., None], 3, axis=2))
+        if isinstance(candidate.get("palette_region_map"), np.ndarray):
+            save_label_map_png(candidate["palette_region_map"], debug / "04_after_graph_merge.png")  # type: ignore[arg-type]
+        if isinstance(candidate.get("initial_palette_preview"), np.ndarray):
+            save_rgb(debug / "05_palette.png", candidate["initial_palette_preview"])  # type: ignore[arg-type]
+        save_label_map_png(region_map, debug / "06_final_regions.png")
+        save_rgb(debug / "07_final_preview.png", painted)
+        template_page.save(debug / "08_template.png")
 
 
 def _option_metadata(

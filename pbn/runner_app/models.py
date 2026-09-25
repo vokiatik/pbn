@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,7 +22,7 @@ class ContinueAIPipelineRequest(RunAIPipelineRequest):
 
 
 class FinalizePBNOptionRequest(RunAIPipelineRequest):
-    difficulty: str
+    difficulty: Literal["hard"]
 
 
 class RunAIPipelineResponse(BaseModel):

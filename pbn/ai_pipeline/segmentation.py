@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import heapq
+import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -175,6 +178,63 @@ def create_slic_atoms(
         channel_axis=-1,
     ).astype(np.int32)
     return labels, rgb
+
+
+def create_structural_atoms(
+    illustration_path: Path,
+    analysis_dir: Path,
+    print_spec: PrintSpec | None = None,
+) -> tuple[np.ndarray, np.ndarray, dict[str, object]]:
+    """Cache connected, source-edge-guided atoms independently of PBN settings.
+
+    Felzenszwalb's local graph criterion follows the actual colour boundaries of
+    the reviewed illustration. In particular, a small high-contrast mark is not
+    forced to share a regular SLIC tile with its surroundings.
+    """
+    with Image.open(illustration_path) as image:
+        rgb = np.asarray(image.convert("RGB"), dtype=np.uint8)
+    mm_per_pixel = _source_mm_per_pixel(rgb.shape[:2], print_spec or PrintSpec())
+    atom_floor_pixels = max(1, int(np.ceil(0.5 / mm_per_pixel**2)))
+    digest = hashlib.sha256(rgb.tobytes()).hexdigest()
+    manifest_path = analysis_dir / "manifest.json"
+    labels_path = analysis_dir / "source_atoms.npy"
+    if manifest_path.is_file() and labels_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if (isinstance(manifest, dict)
+                    and manifest.get("source_sha256") == digest and manifest.get("version") == 7
+                    and manifest.get("atom_floor_pixels") == atom_floor_pixels):
+                labels = np.load(labels_path, allow_pickle=False)
+                if labels.shape == rgb.shape[:2]:
+                    return labels, rgb, {**manifest, "cache_hit": True}
+        except (ValueError, OSError, json.JSONDecodeError):
+            pass
+    start = time.perf_counter()
+    # The reviewed image already defines colour boundaries. Blurring it here
+    # creates extra bands along those boundaries, often joined diagonally.
+    # Analyze the source directly and leave paintability merges to the graph.
+    labels = segmentation.felzenszwalb(
+        rgb,
+        scale=400.0,
+        sigma=0.0,
+        min_size=atom_floor_pixels,
+        channel_axis=-1,
+    ).astype(np.int32) + 1
+    # Felzenszwalb uses diagonal neighbours. Every paint region must instead
+    # have one four-connected component so its area, width and number apply
+    # to a single paintable shape. Split before graph costs are calculated.
+    labels = label_connected_components(labels, connectivity=1, background=0).astype(np.int32)
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    np.save(labels_path, labels)
+    manifest = {
+        "version": 7,
+        "source_sha256": digest,
+        "atom_floor_pixels": atom_floor_pixels,
+        "initial_region_count": int(labels.max()),
+        "analysis_seconds": round(time.perf_counter() - start, 3),
+    }
+    atomic_write_json(manifest_path, manifest)
+    return labels, rgb, {**manifest, "cache_hit": False}
 
 
 def _merge_region_graph(
@@ -484,7 +544,7 @@ def _align_boundaries_to_source(
     original = label_map.astype(np.int32, copy=True)
     original_boundary = _boundary_mask(original)
     mm_per_pixel = _source_mm_per_pixel(original.shape, print_spec)
-    maximum_radius = max(1, int(np.floor(maximum_snap_mm / max(mm_per_pixel, 1e-9))))
+    maximum_radius = max(0, int(np.floor(maximum_snap_mm / max(mm_per_pixel, 1e-9))))
     baseline_alignment = _boundary_alignment_score(source_edge_strength, original_boundary)
     source_lab = (
         prepared_source_lab
@@ -495,6 +555,7 @@ def _align_boundaries_to_source(
     baseline_reconstruction = _region_reconstruction_delta_e(source_lab, original, median_lut)
     original_pairs, anchors = _adjacency_pairs_and_anchors(original, source_edge_strength)
     original_components = _component_counts(original)
+    original_ids = set(int(value) for value in np.unique(original) if int(value) > 0)
     floor_sensitive_ids = _printer_floor_sensitive_region_ids(
         original,
         rgb,
@@ -542,7 +603,6 @@ def _align_boundaries_to_source(
         reasons: list[str] = []
         candidate_pairs = _adjacency_pairs(candidate)
         active_ids = set(int(value) for value in np.unique(candidate) if int(value) > 0)
-        original_ids = set(int(value) for value in np.unique(original) if int(value) > 0)
         topology_preserved = (
             active_ids == original_ids
             and candidate_pairs == original_pairs
@@ -597,7 +657,7 @@ def _align_boundaries_to_source(
             log = {
                 "operation": "source_edge_alignment_summary",
                 "status": "skipped",
-                "reason": "all_snap_proposals_rejected",
+                "reason": "below_source_pixel_size" if maximum_radius == 0 else "all_snap_proposals_rejected",
                 "requested_snap_radius_mm": maximum_snap_mm,
                 "maximum_radius_source_pixels": maximum_radius,
                 "edge_scales_source_pixels": list(edge_scales),

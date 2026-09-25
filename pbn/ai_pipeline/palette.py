@@ -35,6 +35,8 @@ def derive_region_palette(
     dynamic_compaction: bool = False,
     maximum_region_count: int | None = None,
     user_protected_pairs: set[tuple[int, int]] | None = None,
+    minimum_area_pixels: float = 0.0,
+    minimum_width_pixels: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, dict[int, int], list[tuple[int, int, int]], list[dict[str, object]]]:
     """Cluster region colours in Lab and produce a paintable adjacency map.
 
@@ -120,9 +122,25 @@ def derive_region_palette(
 
     # KMeans cluster ids are arbitrary. Sorting makes palette numbering stable.
     order = sorted(range(cluster_count), key=lambda index: tuple(float(v) for v in centers[index]))
-    normalized_cluster = {old: new for new, old in enumerate(order)}
+    # Reserved detail centres and ordinary clusters can represent the same
+    # exported paint. Collapse identical and perceptually indistinguishable
+    # paints before adjacency resolution, using the same Delta-E floor as
+    # weak source boundaries, to avoid invisible seams and redundant numbers.
+    paint_to_cluster: dict[tuple[int, int, int], int] = {}
+    unique_order: list[int] = []
+    normalized_cluster: dict[int, int] = {}
+    for index in order:
+        paint = _lab_to_rgb(centers[index])
+        if paint not in paint_to_cluster:
+            distances = color.deltaE_ciede2000(centers[index][None, :], centers[unique_order])
+            if len(distances) and float(distances.min()) < WEAK_SOURCE_DELTA_E:
+                paint_to_cluster[paint] = int(np.argmin(distances))
+            else:
+                paint_to_cluster[paint] = len(unique_order)
+                unique_order.append(index)
+        normalized_cluster[index] = paint_to_cluster[paint]
     labels = np.asarray([normalized_cluster[int(value)] for value in raw_labels], dtype=np.int32)
-    ordered_centers = centers[order]
+    ordered_centers = centers[unique_order]
     initial_region_to_cluster = dict(zip(region_ids, (int(value) for value in labels), strict=True))
 
     detail_ids = protected_region_ids | prefilled_detail_region_ids
@@ -156,6 +174,8 @@ def derive_region_palette(
                 max(1, int(target_region_count)),
                 max(1, int(maximum_region_count or target_region_count)),
                 user_protected_pairs=user_protected_pairs,
+                minimum_area_pixels=minimum_area_pixels,
+                minimum_width_pixels=minimum_width_pixels,
             )
             merged_map = dynamic.label_map
             merged_lab = dynamic.region_lab

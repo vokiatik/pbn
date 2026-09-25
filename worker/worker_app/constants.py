@@ -24,20 +24,12 @@ PUBLIC_AI_FILES = [
     ("ai_final_palette", "pipeline_ai/export/pbn_final_palette.png"),
     ("ai_template_pdf", "pipeline_ai/export/pbn_template.pdf"),
     ("ai_palette_pdf", "pipeline_ai/export/palette_sheet.pdf"),
-    ("ai_easy_painted_preview", "pipeline_ai/options/easy/painted_reference.png"),
-    ("ai_easy_template_preview", "pipeline_ai/options/easy/numbered_template.png"),
-    ("ai_medium_painted_preview", "pipeline_ai/options/medium/painted_reference.png"),
-    ("ai_medium_template_preview", "pipeline_ai/options/medium/numbered_template.png"),
     ("ai_hard_painted_preview", "pipeline_ai/options/hard/painted_reference.png"),
     ("ai_hard_template_preview", "pipeline_ai/options/hard/numbered_template.png"),
 ]
 
 PUBLIC_PBN_OPTION_FILES = [
     ("ai_simplified", "pipeline_ai/ai/simplified.png"),
-    ("ai_easy_painted_preview", "pipeline_ai/options/easy/painted_reference.png"),
-    ("ai_easy_template_preview", "pipeline_ai/options/easy/numbered_template.png"),
-    ("ai_medium_painted_preview", "pipeline_ai/options/medium/painted_reference.png"),
-    ("ai_medium_template_preview", "pipeline_ai/options/medium/numbered_template.png"),
     ("ai_hard_painted_preview", "pipeline_ai/options/hard/painted_reference.png"),
     ("ai_hard_template_preview", "pipeline_ai/options/hard/numbered_template.png"),
 ]

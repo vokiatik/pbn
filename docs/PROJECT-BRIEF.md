@@ -12,10 +12,10 @@ The app converts one uploaded image into one printable paint-by-number template.
 6. Worker runs `generate_ai_image`.
 7. Runner generates one AI-simplified flat-colour illustration, records an advisory local quality assessment, and the worker persists that assessment before registering `ai_simplified` and stopping for review.
 8. User can regenerate the AI image or proceed to PBN generation.
-9. Worker runs `generate_pbn_options`; runner performs a bounded deterministic density search for Easy, Medium, and Hard against the immutable reviewed AI image.
-10. The frontend shows every valid saved option and never preselects one.
-11. The user explicitly selects a difficulty; only then does `finalize_pbn_option` create or replace the printable exports.
-12. Saved options remain available so the user can change difficulty without another AI call or segmentation run.
+9. Worker runs `generate_pbn_options`; runner generates only Hard against the immutable reviewed AI image, stopping at the first valid result.
+10. The frontend shows the saved Hard preview.
+11. The user clicks Create Hard printable files; only then does `finalize_pbn_option` create or replace the printable exports.
+12. The saved Hard result can be exported again without another AI call or segmentation run.
 
 The primary download list is intentionally limited to six user-facing artifacts: the original image, AI-generated image, coloured preview, paint-by-number preview, final PBN template PDF, and colour palette. Secondary registered outputs remain available to the pipeline and API but are not shown in the primary file table.
 
@@ -27,18 +27,18 @@ Original photo
 -> padded provider input
 -> one detailed AI-simplified flat-colour illustration
 -> immutable reviewed safe-area image
--> immutable multiscale boundary-protection map
--> CIELAB SLICO over-segmentation and protection-aware region-adjacency merging
+-> cached connected source-edge analysis
+-> physical-floor region seed and dynamic region-adjacency merging
 -> deterministic detail-weighted CIELAB palette
 -> physical paintability cleanup and topology-preserving source-edge alignment
 -> adaptive gray numbering with protected-detail palette fallback
--> saved Easy, Medium, and Hard options
--> explicit user selection
+-> saved Hard preview
+-> explicit export action
 -> numbered template for the selected option
 -> A3/A4 PNG/PDF export at 300 DPI
 ```
 
-The old direct photo segmentation workflow, V2 printable workflow, V3 graph-first workflow, and step-by-step controls have been removed. The supported selection UX is limited to saved Easy, Medium, and Hard outputs derived from one approved AI image.
+The old direct photo segmentation workflow, V2 printable workflow, V3 graph-first workflow, and step-by-step controls have been removed. Only Hard output is generated and exportable. Existing Easy/Medium records remain readable for compatibility; their option folders are removed after successful regeneration and they are not offered for selection.
 
 ## Services
 
@@ -76,6 +76,9 @@ pipeline_ai/
     generation.json
     quality_report.json
     quality_preview.png
+  analysis/
+    source_atoms.npy
+    manifest.json
   regions/
     slico_map.png
     graph_merged_map.png
@@ -102,13 +105,13 @@ pipeline_ai/
   options/
     options.json
     attempt_reports/
-      {easy|medium|hard}-{attempt}.json
+      hard-{attempt}.json
     .attempts/                 # retained only when every option fails
-      {easy|medium|hard}/{attempt}/failure/
+      hard/{attempt}/failure/
         diagnostics.json
         region_id_map.npy
         region_map.png
-    {easy|medium|hard}/
+    hard/
       metadata.json
       label_plan.json
       painted_reference.png
@@ -191,13 +194,15 @@ Settings are persisted in `projects.ai_settings` when AI generation is queued. `
 
 ## Preserve Detail Selection
 
-After the reviewed AI image is ready, the user may lasso filled Preserve Detail areas, refine them with 1%, 3%, or 6% paint/erase brushes, and use undo/redo. White pixels select advanced processing; black pixels retain the ordinary SLIC path. Selections above 40% show a performance warning but remain valid.
+After the reviewed AI image is ready, the user may lasso filled Preserve Detail areas, refine them with 1%, 3%, or 6% paint/erase brushes, and use undo/redo. White pixels emphasize source-supported boundaries in the selected area. All pixels use the same connected source graph. Selections above 40% show a performance warning but remain valid.
 
 The backend stores the exact-size normalized mask and manifest under `pipeline_ai/input/`. Editing it is owner-only and idle-state-only. A mask change intentionally invalidates options and final exports and returns the project to `ai_image_ready`; replacing the source or reviewed AI image clears it.
 
-The runner expands the selection through a 1.2 mm transition and every intersected SLIC atom so the lasso edge cannot become a generated border. It derives four-connected exact-colour source microregions in that zone, collapses unsupported boundaries, and stitches them into the ordinary SLIC graph. All difficulties use the same mask with evidence multipliers 2.9/5.8/11.6 for Easy/Medium/Hard. A meaningful selected boundary also receives a difficulty-scaled evidence floor, so a near-zero heuristic score cannot make a real selected detail ineffective. Selection cannot protect a boundary that the reviewed image does not support. When detail protection is active, printable contour approximation receives a 45% smoothing nudge; the ordinary global difficulty profiles remain unchanged.
+The runner analyzes the reviewed image once into connected colour-edge regions and caches that analysis by image hash. The mask changes edge evidence only where a boundary exists in the reviewed image; it does not cut out an isolated processing zone or introduce a lasso border. Hard uses this shared structural graph. A selected boundary receives the Hard evidence boost and may use up to 10% density overflow. A meaningful feature still must satisfy the physical printer floor and global palette constraints.
 
-The unified graph uses immutable source-pixel Lab statistics and additive requested-palette reconstruction costs. Density is still a ceiling; only selected, source-supported boundaries can justify up to 10% protection-only overflow, and forced protected merges are reported when physical, density, or exact-palette limits require them. If faithful recolouring and ordinary merges cannot resolve a protected natural-boundary palette conflict, the runner merges one deterministic lowest-reconstruction-loss boundary at a time and records the fallback without exceeding the requested palette size.
+The unified graph uses immutable source-pixel Lab statistics and additive requested-palette reconstruction costs. Dynamic merge priorities combine reconstruction loss with source boundary contrast and are recomputed after each merge; natural boundaries have graded costs rather than a hard veto. Regions below the physical area or width floor are resolved in this graph before the final cleanup check. Hard starts with a density ceiling of 650 regions and retries only if validation fails. If faithful recolouring cannot resolve a palette conflict, the runner merges a deterministic lowest-loss boundary and records the fallback without exceeding the requested palette size.
+
+Structural analysis reads the reviewed colours without adding blur bands, then splits diagonal-only contacts into separate four-connected regions before measuring or merging them. Palette centres that export to the same RGB colour, or differ by less than the existing 2 Delta-E weak-contrast floor, share one paint identity before adjacency resolution. Validation measures actual connected components and rejects disconnected numbered regions and duplicate paint colours. Boundary alignment skips movement when one source pixel would exceed the physical snap limit.
 
 ## Configuration
 
@@ -231,6 +236,8 @@ PBN_OPTION_MAX_ATTEMPTS=5
 `OPENAI_IMAGE_MODERATION` accepts `low` or `auto` and defaults to `low`. When OpenAI returns a `moderation_blocked` error, the runner preserves the optional coarse moderation stage, public categories, and request ID; the worker stores an actionable user-facing error and does not retry the unchanged request.
 
 `PBN_OPTION_MAX_ATTEMPTS` defaults to five and is clamped to `1-5`. It counts the initial local attempt and never triggers another provider request.
+
+`PBN_DEBUG_IMAGES=1` retains eight per-option debug images under `options/{difficulty}/debug/`, from the reviewed source and connected atoms through the graph, palette, final preview, and template. Validation reports include region counts by stage, physical-floor merge counts, region area and boundary complexity summaries, and stage timings. Debug files are internal traces.
 
 After density and palette compaction, every option candidate is aligned to multiscale Lab edges from the immutable reviewed AI image within a maximum 0.6 mm corridor. Regions close enough to the printer floor to be endangered by the move are frozen and cannot gain or lose pixels. The alignment keeps fixed contacts for every adjacency and applies only topology-safe four-connected pixel moves. Individual proposals are rejected if they change topology, violate the printer floor, reduce edge support, or worsen source-median reconstruction beyond the allowed tolerance. When all optional proposals are rejected but the pre-alignment map remains printable, the runner keeps that map and records alignment as skipped; an invalid baseline still fails with structured diagnostics. Template export traces every shared boundary once so neighbouring regions cannot create doubled strokes.
 
