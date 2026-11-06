@@ -26,6 +26,8 @@ services:
     env_file:
       - ./deploy/env/postgres.env
     environment:
+      POSTGRES_USER: pbn
+      POSTGRES_DB: pbn
       # Generate a hex password; it is also interpolated into a URI below.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set a random hexadecimal database password}
     volumes:

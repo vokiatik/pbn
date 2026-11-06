@@ -128,6 +128,35 @@ rotated logs, and non-root application containers with read-only root filesystem
 The worker mounts project storage read-only; backend and runner share UID 10001
 and write access. Fresh volume ownership is prepared by the images.
 
+The production Compose file explicitly sets `POSTGRES_USER=pbn` and
+`POSTGRES_DB=pbn` to match the backend connection string. These settings only
+initialize a fresh database volume; redeploying does not create a missing role
+or database in an existing volume.
+
+If the database was initialized with only the default `postgres` role and
+databases, open the Postgres container terminal and run:
+
+```sh
+psql -U postgres -d postgres
+```
+
+Create the missing application role:
+
+```sql
+CREATE ROLE pbn LOGIN;
+```
+
+Run `\password pbn` and enter the exact password saved as `POSTGRES_PASSWORD`
+in Coolify at both prompts. After those prompts finish, create the database:
+
+```sql
+CREATE DATABASE pbn OWNER pbn;
+```
+
+Exit with `\q` and redeploy. Use this recovery only after confirming that both
+the `pbn` role and database are absent with `\du` and `\l`; if either already
+exists, inspect it before making changes. Preserve the existing database volume.
+
 Check these before considering the domain live:
 
 1. `https://pbn.zichka.com/` loads; reloading a project page works.
